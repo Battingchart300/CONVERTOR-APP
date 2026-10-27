@@ -28,10 +28,13 @@ from PySide6.QtWidgets import (
 
 from .actions import (
     ACTIONS,
+    DOCX_ACTIONS,
     MD_ACTIONS,
+    PDF_ACTIONS,
     default_text_dir,
     default_text_filename,
     save_text_to_path,
+    text_to_pdf_path,
 )
 
 
@@ -161,6 +164,7 @@ class FloatingWidget(QWidget):
         items = [
             ("Save .md", lambda: self._save_text(text, "md")),
             ("Save .txt", lambda: self._save_text(text, "txt")),
+            ("To PDF", lambda: self._save_pasted_pdf(text)),
             ("To HTML", lambda: self._save_text(text, "html")),
             ("Copy", lambda: self._copy_text(text)),
         ]
@@ -185,6 +189,16 @@ class FloatingWidget(QWidget):
         if not chosen:
             return None
         return save_text_to_path(text, chosen, kind)
+
+    def _save_pasted_pdf(self, text: str):
+        """Save pasted text as PDF, dialog defaults to the Desktop."""
+        default = str(default_text_dir() / default_text_filename("pdf"))
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Save text as PDF", default, "PDF (*.pdf)"
+        )
+        if not chosen:
+            return None
+        return text_to_pdf_path(text, chosen)
 
     def _copy_text(self, text: str) -> str:
         QApplication.clipboard().setText(text)
@@ -214,10 +228,16 @@ class FloatingWidget(QWidget):
         if not file_path.is_file():
             QMessageBox.warning(self, "Failed", "Drop a single file, not a folder.")
             return
-        # .md files get the MD ring (v0.2); everything else keeps the
-        # v0.1 image ring, which fails gracefully on non-images.
-        if file_path.suffix.lower() in (".md", ".markdown"):
+        # Route by extension (v0.2): .md -> MD ring, .pdf -> PDF ring,
+        # .docx -> Word ring, everything else keeps the v0.1 image
+        # ring, which fails gracefully on non-images.
+        suffix = file_path.suffix.lower()
+        if suffix in (".md", ".markdown"):
             actions = MD_ACTIONS
+        elif suffix == ".pdf":
+            actions = PDF_ACTIONS
+        elif suffix == ".docx":
+            actions = DOCX_ACTIONS
         else:
             actions = ACTIONS
         items = [
