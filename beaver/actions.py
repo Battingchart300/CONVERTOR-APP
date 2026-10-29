@@ -92,33 +92,80 @@ def convert_to_png(
     return target
 
 
+def _clamp_quality(value, default: int) -> int:
+    """Clamp a quality setting to 10-100, falling back to ``default``."""
+    try:
+        return max(10, min(int(value), 100))
+    except (TypeError, ValueError):
+        return default
+
+
 def convert_to_jpg(
-    source: str | os.PathLike, output_dir=None, output_path=None
+    source: str | os.PathLike, output_dir=None, output_path=None,
+    jpg_quality=92,
 ) -> Path:
-    """Convert an image to JPG (quality 92; default: next to original)."""
+    """Convert an image to JPG (default quality 92; next to original)."""
     original = Path(source)
     image = _open_image(original)
     target = _resolve_target(original, "_converted", "jpg", output_dir, output_path)
-    image.convert("RGB").save(target, format="JPEG", quality=92)
+    image.convert("RGB").save(
+        target, format="JPEG", quality=_clamp_quality(jpg_quality, 92)
+    )
     return target
 
 
 def compress_image(
-    source: str | os.PathLike, output_dir=None, output_path=None
+    source: str | os.PathLike, output_dir=None, output_path=None,
+    compress_quality=70,
 ) -> Path:
     """Save a smaller version of the image (default: next to original).
 
-    JPEGs are re-saved at quality 70. Other formats are re-saved
-    with Pillow's ``optimize`` flag. Dimensions are unchanged in v0.1.
+    JPEGs are re-saved at ``compress_quality`` (default 70). Other
+    formats are re-saved with Pillow's ``optimize`` flag.
+    Dimensions are unchanged in v0.1.
     """
     original = Path(source)
     image = _open_image(original)
     extension = _image_extension(original)
     target = _resolve_target(original, "_compressed", extension, output_dir, output_path)
     if extension == "jpg":
-        image.convert("RGB").save(target, format="JPEG", quality=70, optimize=True)
+        image.convert("RGB").save(
+            target, format="JPEG",
+            quality=_clamp_quality(compress_quality, 70), optimize=True,
+        )
     else:
         image.save(target, optimize=True)
+    return target
+
+
+def convert_to_webp(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert an image to WEBP (quality 90; next to original)."""
+    original = Path(source)
+    image = _open_image(original)
+    target = _resolve_target(original, "_converted", "webp", output_dir, output_path)
+    image.convert("RGB").save(target, format="WEBP", quality=90)
+    return target
+
+
+def image_to_pdf(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Render an image into a single-page PDF (next to original)."""
+    original = Path(source)
+    image = _open_image(original)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    if image.mode in ("RGBA", "LA") or (
+        image.mode == "P" and "transparency" in image.info
+    ):
+        rgba = image.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        background.alpha_composite(rgba)
+        image = background.convert("RGB")
+    else:
+        image = image.convert("RGB")
+    image.save(target, format="PDF")
     return target
 
 
@@ -871,13 +918,361 @@ def odp_to_pdf(
     return _md_lines_to_pdf(_odp_to_md_lines(original), target)
 
 
+# ---------------------------------------------------------------------------
+# More formats (v0.5, stdlib only for the Office formats — same
+# approach as ODF: the .xlsx/.pptx files are ZIPs with XML inside).
+# Honest limitations: values only, formulas are read as their
+# stored (cached) value and are NOT recalculated; text only for
+# slides; images, styles, exact layout, charts and embedded
+# objects are NOT preserved. Bad files raise a clean ValueError.
+# ---------------------------------------------------------------------------
+
+
+def _ooxml_root(source: Path, member: str):
+    """Parse one XML member from an Office ZIP, or raise ValueError."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    try:
+        with zipfile.ZipFile(source) as archive:
+            try:
+                data = archive.read(member)
+            except KeyError as exc:
+                raise ValueError(
+                    f"Not a readable Office file (no {member}): {source.name}"
+                ) from exc
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"Not a readable Office file: {source.name}") from exc
+    try:
+        return ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise ValueError(f"Not a readable Office file: {source.name}") from exc
+
+
+def _ooxml_members(source: Path) -> list[str]:
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(source) as archive:
+            return archive.namelist()
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"Not a readable Office file: {source.name}") from exc
+
+
+def _col_letters(ref: str) -> str:
+    return "".join(ch for ch in ref if ch.isalpha())
+
+
+def _xlsx_sheets(source: Path) -> list[tuple[str, list[list[str]]]]:
+    """(sheet name, rows) for an .xlsx file, in workbook order."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    try:
+        with zipfile.ZipFile(source) as archive:
+            shared: list[str] = []
+            if "xl/sharedStrings.xml" in archive.namelist():
+                sroot = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                for si in sroot:
+                    if _local(si.tag) != "si":
+                        continue
+                    shared.append("".join(
+                        t.text or "" for t in si.iter() if _local(t.tag) == "t"
+                    ))
+            workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+            names = [
+                s.attrib.get("name", f"Sheet {i + 1}")
+                for i, s in enumerate(workbook.iter())
+                if _local(s.tag) == "sheet"
+            ]
+            sheets: list[tuple[str, list[list[str]]]] = []
+            sheet_files = sorted(
+                (n for n in archive.namelist()
+                 if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")),
+                key=lambda n: int("".join(ch for ch in n.split("/")[-1] if ch.isdigit()) or 0),
+            )
+            for index, member in enumerate(sheet_files):
+                sroot = ET.fromstring(archive.read(member))
+                rows_by_num: dict[int, dict[str, str]] = {}
+                for row in sroot.iter():
+                    if _local(row.tag) != "row":
+                        continue
+                    try:
+                        rnum = int(row.attrib.get("r", "0"))
+                    except ValueError:
+                        rnum = 0
+                    cells: dict[str, str] = {}
+                    for cell in row:
+                        if _local(cell.tag) != "c":
+                            continue
+                        ref = cell.attrib.get("r", "")
+                        ctype = cell.attrib.get("t")
+                        value = ""
+                        if ctype == "s":
+                            v = next((e.text for e in cell if _local(e.tag) == "v"), None)
+                            try:
+                                value = shared[int(v)] if v is not None else ""
+                            except (ValueError, IndexError):
+                                value = ""
+                        elif ctype == "inlineStr":
+                            value = "".join(
+                                t.text or "" for t in cell.iter() if _local(t.tag) == "t"
+                            )
+                        else:
+                            # Plain value, or a formula's cached value in <v>.
+                            value = next(
+                                (e.text or "" for e in cell if _local(e.tag) == "v"), ""
+                            )
+                        cells[_col_letters(ref)] = value
+                    if cells:
+                        rows_by_num[rnum] = cells
+                rows: list[list[str]] = []
+                if rows_by_num:
+                    all_cols = sorted(
+                        {c for cells in rows_by_num.values() for c in cells},
+                        key=lambda c: (len(c), c),
+                    )
+                    for rnum in sorted(rows_by_num):
+                        rows.append([rows_by_num[rnum].get(c, "") for c in all_cols])
+                while rows and not any(rows[-1]):
+                    rows.pop()
+                name = names[index] if index < len(names) else f"Sheet {index + 1}"
+                sheets.append((name, rows))
+            return sheets
+    except (zipfile.BadZipFile, ET.ParseError, KeyError) as exc:
+        raise ValueError(f"Not a readable Excel file: {source.name}") from exc
+
+
+def _rows_to_md_lines(rows: list[list[str]]) -> list[str]:
+    """Markdown table lines for rows (first row = header)."""
+    if not rows:
+        return []
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    clean = [[c.replace("|", "\\|") for c in r] for r in rows]
+    lines = ["| " + " | ".join(clean[0]) + " |",
+             "| " + " | ".join("---" for _ in clean[0]) + " |"]
+    lines.extend("| " + " | ".join(r) + " |" for r in clean[1:])
+    return lines
+
+
+def _xlsx_to_md_lines(source: Path) -> list[str]:
+    lines = [f"# {source.stem}\n"]
+    for name, rows in _xlsx_sheets(source):
+        lines.append(f"\n## {name}\n")
+        lines.extend(_rows_to_md_lines(rows))
+    return lines
+
+
+def xlsx_to_md(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert an Excel (.xlsx) file to Markdown tables (values only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(_xlsx_to_md_lines(original)), encoding="utf-8")
+    return target
+
+
+def xlsx_to_csv(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert an Excel (.xlsx) file to CSV (first sheet only)."""
+    import csv
+    import io
+
+    original = Path(source)
+    sheets = _xlsx_sheets(original)
+    target = _resolve_target(original, "_converted", "csv", output_dir, output_path)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    if sheets:
+        for row in sheets[0][1]:
+            writer.writerow(row)
+    target.write_text(buffer.getvalue(), encoding="utf-8", newline="")
+    return target
+
+
+def xlsx_to_pdf(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert an Excel (.xlsx) file to PDF (tables as text only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(_xlsx_to_md_lines(original), target)
+
+
+def _pptx_to_md_lines(source: Path) -> list[str]:
+    lines = [f"# {source.stem}\n"]
+    members = [m for m in _ooxml_members(source)
+               if m.startswith("ppt/slides/slide") and m.endswith(".xml")]
+    members.sort(key=lambda m: int("".join(ch for ch in m.split("/")[-1] if ch.isdigit()) or 0))
+    if not members:
+        raise ValueError(f"Not a readable PowerPoint file: {source.name}")
+    for index, member in enumerate(members, start=1):
+        root = _ooxml_root(source, member)
+        lines.append(f"\n## Slide {index}\n")
+        for para in root.iter():
+            if _local(para.tag) != "p":
+                continue
+            text = "".join(t.text or "" for t in para.iter() if _local(t.tag) == "t").strip()
+            if text:
+                lines.append(text)
+    return lines
+
+
+def pptx_to_md(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a PowerPoint (.pptx) file to Markdown (slide text only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(_pptx_to_md_lines(original)), encoding="utf-8")
+    return target
+
+
+def pptx_to_pdf(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a PowerPoint (.pptx) file to PDF (slide text only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(_pptx_to_md_lines(original), target)
+
+
+def txt_to_md(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a plain-text (.txt) file to Markdown (text unchanged)."""
+    original = Path(source)
+    text = _read_text(original)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    return target
+
+
+def txt_to_pdf(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a plain-text (.txt) file to PDF."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(_read_text(original).splitlines(), target)
+
+
+def _csv_rows(source: Path) -> list[list[str]]:
+    import csv
+    import io
+
+    try:
+        raw = source.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"Not a readable CSV file: {source.name}") from exc
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = raw.decode("latin-1")
+    try:
+        return [row for row in csv.reader(io.StringIO(text)) if row]
+    except csv.Error as exc:
+        raise ValueError(f"Not a readable CSV file: {source.name}") from exc
+
+
+def csv_to_md(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a CSV file to a Markdown table (first row = header)."""
+    original = Path(source)
+    lines = [f"# {original.stem}\n"]
+    lines.extend(_rows_to_md_lines(_csv_rows(original)))
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
+def csv_to_pdf(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert a CSV file to PDF (table as text only)."""
+    original = Path(source)
+    lines = [f"# {original.stem}\n"]
+    lines.extend(_rows_to_md_lines(_csv_rows(original)))
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(lines, target)
+
+
+def _html_to_md_lines(text: str) -> list[str]:
+    """Readable Markdown lines from HTML: headings, paragraphs, lists.
+
+    Tags, scripts, styles and CSS/layout are dropped; only the
+    readable text survives, in document order.
+    """
+    from html.parser import HTMLParser
+
+    class _Parser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.lines: list[str] = []
+            self._buf: list[str] = []
+            self._skip = 0
+            self._heading = 0
+
+        def _flush(self, prefix=""):
+            chunk = "".join(self._buf).strip()
+            self._buf = []
+            if chunk:
+                self.lines.append((prefix + chunk) if prefix else chunk)
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"):
+                self._skip += 1
+            elif tag.startswith("h") and len(tag) == 2 and tag[1].isdigit():
+                self._flush()
+                self._heading = int(tag[1])
+            elif tag in ("p", "div", "tr", "section", "article"):
+                self._flush()
+            elif tag == "li":
+                self._flush()
+                self._buf.append("")  # marker replaced below
+                self._buf = ["- "]
+            elif tag == "br":
+                self._flush()
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style"):
+                self._skip = max(0, self._skip - 1)
+            elif tag.startswith("h") and len(tag) == 2 and tag[1].isdigit():
+                prefix = "#" * max(1, min(self._heading, 6)) + " "
+                self._flush(prefix)
+                self._heading = 0
+            elif tag in ("p", "div", "li", "tr"):
+                self._flush()
+
+        def handle_data(self, data):
+            if self._skip:
+                return
+            self._buf.append(data)
+
+    parser = _Parser()
+    parser.feed(text)
+    parser._flush()
+    return parser.lines
+
+
+def html_to_md(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert an HTML (.html/.htm) file to Markdown (readable text only)."""
+    original = Path(source)
+    lines = [f"# {original.stem}\n"]
+    lines.extend(_html_to_md_lines(_read_text(original)))
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
+def html_to_pdf(source: str | os.PathLike, output_dir=None, output_path=None) -> Path:
+    """Convert an HTML (.html/.htm) file to PDF (readable text only)."""
+    original = Path(source)
+    lines = [f"# {original.stem}\n"]
+    lines.extend(_html_to_md_lines(_read_text(original)))
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(lines, target)
+
+
 # Action id -> (button label, function), used by the ring menu.
 ACTIONS = [
     ("PNG", convert_to_png),
     ("JPG", convert_to_jpg),
+    ("WEBP", convert_to_webp),
     ("Compress", compress_image),
     ("Strip metadata", strip_metadata),
     ("White background", add_white_background),
+    ("Image → PDF", image_to_pdf),
 ]
 
 # .md files: MD -> PDF is the v0.2 headline; MD -> HTML and MD -> TXT
@@ -916,6 +1311,70 @@ ODP_ACTIONS = [
     ("ODP → PDF", odp_to_pdf),
 ]
 
+# Office / text formats (v0.5, stdlib parsing where possible).
+XLSX_ACTIONS = [
+    ("XLSX → MD", xlsx_to_md),
+    ("XLSX → CSV", xlsx_to_csv),
+    ("XLSX → PDF", xlsx_to_pdf),
+]
+
+PPTX_ACTIONS = [
+    ("PPTX → MD", pptx_to_md),
+    ("PPTX → PDF", pptx_to_pdf),
+]
+
+TXT_ACTIONS = [
+    ("TXT → MD", txt_to_md),
+    ("TXT → PDF", txt_to_pdf),
+]
+
+CSV_ACTIONS = [
+    ("CSV → MD", csv_to_md),
+    ("CSV → PDF", csv_to_pdf),
+]
+
+HTML_ACTIONS = [
+    ("HTML → MD", html_to_md),
+    ("HTML → PDF", html_to_pdf),
+]
+
+# One-line descriptions for the v0.5 conversion cards in the GUI.
+# Keys are the action functions; unknown functions fall back to
+# their button label in the GUI.
+ACTION_DESCRIPTIONS = {
+    convert_to_png: "Prevedie obrázok do PNG",
+    convert_to_jpg: "Prevedie obrázok do JPG",
+    convert_to_webp: "Prevedie obrázok do WEBP",
+    compress_image: "Zmenší obrázok (nižšia kvalita / optimalizácia)",
+    strip_metadata: "Odstráni EXIF a GPS metadáta",
+    add_white_background: "Priehľadné pozadie nahradí bielym",
+    image_to_pdf: "Vloží obrázok do PDF dokumentu",
+    md_to_pdf: "Prevedie Markdown do PDF",
+    clean_md: "Vyčistí Markdown (medzery navyše)",
+    md_to_txt: "Prevedie Markdown na čistý text",
+    md_to_html: "Prevedie Markdown do HTML stránky",
+    pdf_to_md: "Vytiahne text z PDF do Markdownu",
+    docx_to_md: "Vytiahne text z Wordu do Markdownu",
+    docx_to_pdf: "Prevedie Word do PDF (len text)",
+    odt_to_md: "Vytiahne text z LibreOffice Writer do Markdownu",
+    odt_to_pdf: "Prevedie LibreOffice Writer do PDF (len text)",
+    ods_to_md: "Prevedie tabuľky z Calcu do Markdownu",
+    ods_to_csv: "Prevedie prvý hárok z Calcu do CSV",
+    odp_to_md: "Vytiahne text zo slajdov do Markdownu",
+    odp_to_pdf: "Prevedie prezentáciu do PDF (len text)",
+    xlsx_to_md: "Prevedie hárky z Excelu do Markdownu",
+    xlsx_to_csv: "Prevedie prvý hárok z Excelu do CSV",
+    xlsx_to_pdf: "Prevedie Excel do PDF (len text)",
+    pptx_to_md: "Vytiahne text zo slajdov do Markdownu",
+    pptx_to_pdf: "Prevedie prezentáciu do PDF (len text)",
+    txt_to_md: "Prevedie textový súbor do Markdownu",
+    txt_to_pdf: "Prevedie textový súbor do PDF",
+    csv_to_md: "Prevedie CSV tabuľku do Markdownu",
+    csv_to_pdf: "Prevedie CSV tabuľku do PDF",
+    html_to_md: "Vytiahne čitateľný text z HTML do Markdownu",
+    html_to_pdf: "Prevedie HTML do PDF (len text)",
+}
+
 _IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff",
 }
@@ -941,6 +1400,16 @@ def actions_for_file(path: str | os.PathLike) -> list:
         return list(ODS_ACTIONS)
     if suffix == ".odp":
         return list(ODP_ACTIONS)
+    if suffix == ".xlsx":
+        return list(XLSX_ACTIONS)
+    if suffix == ".pptx":
+        return list(PPTX_ACTIONS)
+    if suffix == ".txt":
+        return list(TXT_ACTIONS)
+    if suffix == ".csv":
+        return list(CSV_ACTIONS)
+    if suffix in (".html", ".htm"):
+        return list(HTML_ACTIONS)
     if suffix in _IMAGE_EXTENSIONS:
         return list(ACTIONS)
     return []
@@ -951,6 +1420,8 @@ def actions_for_file(path: str | os.PathLike) -> list:
 _ACTION_OUTPUT = {
     convert_to_png: ("_converted", "png"),
     convert_to_jpg: ("_converted", "jpg"),
+    convert_to_webp: ("_converted", "webp"),
+    image_to_pdf: ("_converted", "pdf"),
     add_white_background: ("_whitebg", "png"),
     md_to_pdf: ("_converted", "pdf"),
     clean_md: ("_clean", "md"),
@@ -965,6 +1436,17 @@ _ACTION_OUTPUT = {
     ods_to_csv: ("_converted", "csv"),
     odp_to_md: ("_converted", "md"),
     odp_to_pdf: ("_converted", "pdf"),
+    xlsx_to_md: ("_converted", "md"),
+    xlsx_to_csv: ("_converted", "csv"),
+    xlsx_to_pdf: ("_converted", "pdf"),
+    pptx_to_md: ("_converted", "md"),
+    pptx_to_pdf: ("_converted", "pdf"),
+    txt_to_md: ("_converted", "md"),
+    txt_to_pdf: ("_converted", "pdf"),
+    csv_to_md: ("_converted", "md"),
+    csv_to_pdf: ("_converted", "pdf"),
+    html_to_md: ("_converted", "md"),
+    html_to_pdf: ("_converted", "pdf"),
 }
 
 

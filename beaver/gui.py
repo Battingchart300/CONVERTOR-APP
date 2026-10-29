@@ -1,4 +1,4 @@
-"""Main local GUI window for CONVERTOR-APP (v0.4).
+"""Main local GUI window for CONVERTOR-APP (v0.5).
 
 Written from scratch for this app, in PySide6. It is in the same
 spirit as a local launcher window — sections, buttons, and a
@@ -33,9 +33,17 @@ in the main window, and shows a Done message.
 
 Plus Settings, reached from the top row: the app title on the
 left and a "⚙ Nastavenia" gear button on the right. The gear
-opens a Settings dialog (Output / Text / Widget) whose values
-are saved to ~/.convertor-app/settings.json — outside the repo,
-so a git pull never overwrites them — and applied immediately.
+opens a Settings dialog (Output / Text / Widget / Images /
+Aktualizácie) whose values are saved to
+~/.convertor-app/settings.json — outside the repo, so a git
+pull never overwrites them — and applied immediately.
+
+v0.5 adds: more file types (XLSX, PPTX, TXT, CSV, HTML,
+image → PDF / WEBP), conversion cards with descriptions,
+a file-info line, batch conversion, JPG/compress quality
+settings, a session history list, an "Otvoriť priečinok"
+button, and update checking — automatic (silent) at startup
+plus manual in Settings → Aktualizácie.
 
 Everything runs locally. No upload, no account, no keys, no network.
 """
@@ -46,27 +54,34 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from .actions import (
+    ACTION_DESCRIPTIONS,
     actions_for_file,
+    compress_image,
+    convert_to_jpg,
     default_output_for,
     default_text_dir,
     default_text_filename,
@@ -74,6 +89,7 @@ from .actions import (
     text_to_pdf_path,
 )
 from .settings import default_settings, load_settings, save_settings
+from .update_check import check_update, run_update
 from .widget import FloatingWidget, TextDialog
 
 
@@ -92,6 +108,12 @@ _FILE_TYPE_LABELS = {
     ".odt": "LibreOffice Writer dokument (.odt)",
     ".ods": "LibreOffice Calc tabuľka (.ods)",
     ".odp": "LibreOffice Impress prezentácia (.odp)",
+    ".xlsx": "Excel tabuľka (.xlsx)",
+    ".pptx": "PowerPoint prezentácia (.pptx)",
+    ".txt": "Textový súbor (.txt)",
+    ".csv": "CSV tabuľka (.csv)",
+    ".html": "HTML stránka (.html)",
+    ".htm": "HTML stránka (.htm)",
     ".png": "Obrázok (.png)",
     ".jpg": "Obrázok (.jpg)",
     ".jpeg": "Obrázok (.jpeg)",
@@ -106,6 +128,15 @@ _FILE_TYPE_LABELS = {
 def _file_type_label(path: Path) -> str:
     """Plain-words label for a file type, or "" if unknown."""
     return _FILE_TYPE_LABELS.get(path.suffix.lower(), "")
+
+
+def _format_size(size: int) -> str:
+    """Human-readable file size: B, KB or MB (1 decimal)."""
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
 
 
 class ActionChoiceDialog(QDialog):
@@ -202,7 +233,9 @@ class SettingsDialog(QDialog):
 
     Sections: Output (mode, folder, ask-for-output-file), Text
     (default folder for pasted-text saves), Widget (show the
-    floating widget at startup). ``settings`` holds the chosen
+    floating widget at startup), Images (JPG / compress quality)
+    and Aktualizácie (manual update check + update button).
+    ``settings`` holds the chosen
     values after Accept; Cancel leaves everything unchanged;
     "Reset to defaults" restores the default values in the
     dialog (they are only saved when Save is clicked).
@@ -260,6 +293,43 @@ class SettingsDialog(QDialog):
         widget_layout.addWidget(self._widget_checkbox)
         layout.addWidget(widget_box)
 
+        # --- Images (v0.5) -----------------------------------------
+        images_box = QGroupBox("Obrázky")
+        images_layout = QVBoxLayout(images_box)
+        jpg_row = QHBoxLayout()
+        jpg_row.addWidget(QLabel("JPG kvalita (10–100):"))
+        self._jpg_spin = QSpinBox()
+        self._jpg_spin.setRange(10, 100)
+        jpg_row.addWidget(self._jpg_spin)
+        jpg_row.addStretch(1)
+        images_layout.addLayout(jpg_row)
+        comp_row = QHBoxLayout()
+        comp_row.addWidget(QLabel("Kvalita kompresie JPG (10–100):"))
+        self._compress_spin = QSpinBox()
+        self._compress_spin.setRange(10, 100)
+        comp_row.addWidget(self._compress_spin)
+        comp_row.addStretch(1)
+        images_layout.addLayout(comp_row)
+        layout.addWidget(images_box)
+
+        # --- Updates (v0.5) ----------------------------------------
+        update_box = QGroupBox("Aktualizácie")
+        update_layout = QVBoxLayout(update_box)
+        self._update_status = QLabel("Zatiaľ neskontrolované.")
+        self._update_status.setWordWrap(True)
+        update_layout.addWidget(self._update_status)
+        update_row = QHBoxLayout()
+        check_button = QPushButton("Skontrolovať aktualizácie")
+        check_button.clicked.connect(self._check_updates)
+        self._update_button = QPushButton("Aktualizovať")
+        self._update_button.setEnabled(False)
+        self._update_button.clicked.connect(self._run_update)
+        update_row.addWidget(check_button)
+        update_row.addWidget(self._update_button)
+        update_row.addStretch(1)
+        update_layout.addLayout(update_row)
+        layout.addWidget(update_box)
+
         # --- Buttons -----------------------------------------------
         button_row = QHBoxLayout()
         reset = QPushButton("Reset to defaults")
@@ -286,7 +356,53 @@ class SettingsDialog(QDialog):
         self._widget_checkbox.setChecked(
             bool(settings.get("show_widget_on_start"))
         )
+        try:
+            self._jpg_spin.setValue(int(settings.get("jpg_quality", 92)))
+        except (TypeError, ValueError):
+            self._jpg_spin.setValue(92)
+        try:
+            self._compress_spin.setValue(int(settings.get("compress_quality", 70)))
+        except (TypeError, ValueError):
+            self._compress_spin.setValue(70)
         self._on_folder_toggled()
+
+    def _check_updates(self) -> None:
+        """Manual update check: status text + enable Update if available."""
+        result = check_update()
+        local = result.get("local", "")
+        remote = result.get("remote", "")
+        short_local = local[:7] if local else "?"
+        short_remote = remote[:7] if remote else "?"
+        if result["status"] == "up_to_date":
+            self._update_status.setText(
+                f"Aktuálna verzia: {short_local} — Máš najnovšiu verziu."
+            )
+        elif result["status"] == "available":
+            self._update_status.setText(
+                f"Aktuálna: {short_local}, na GitHube: {short_remote} — "
+                "K dispozícii je aktualizácia."
+            )
+        else:
+            self._update_status.setText(result.get("message", "Kontrola sa nepodarila."))
+        self._update_button.setEnabled(result["status"] == "available")
+
+    def _run_update(self) -> None:
+        """Pull from origin/main, then tell the user to restart."""
+        result = run_update()
+        if result.get("success"):
+            self._update_status.setText(
+                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala."
+            )
+            self._update_button.setEnabled(False)
+            QMessageBox.information(
+                self, "Aktualizované",
+                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Aktualizácia zlyhala",
+                result.get("message", "Aktualizácia zlyhala."),
+            )
 
     def _on_folder_toggled(self) -> None:
         enabled = self._folder_radio.isChecked()
@@ -319,8 +435,108 @@ class SettingsDialog(QDialog):
             "ask_output_file": self._ask_checkbox.isChecked(),
             "text_folder": self._text_edit.text().strip(),
             "show_widget_on_start": self._widget_checkbox.isChecked(),
+            "jpg_quality": self._jpg_spin.value(),
+            "compress_quality": self._compress_spin.value(),
         }
         super().accept()
+
+
+class BatchDialog(QDialog):
+    """Batch conversion (v0.5): many files, one conversion per type.
+
+    Files are grouped by suffix. Each group with fitting actions
+    gets a combo box to pick one conversion; that conversion then
+    runs for every file in the group. Groups with no fitting
+    action are listed as unsupported and skipped. Output
+    settings are respected, but the per-file "ask for output
+    file" dialog is deliberately NOT shown per file in batch
+    mode (it would prompt for every file); the chosen output
+    folder / next-to-original rule applies instead.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._main = parent
+        self.setWindowTitle("Hromadná konverzia")
+        self.setMinimumSize(520, 420)
+        layout = QVBoxLayout(self)
+        pick = QPushButton("Vybrať súbory…")
+        pick.clicked.connect(self._pick_files)
+        layout.addWidget(pick)
+        self._groups_area = QVBoxLayout()
+        layout.addLayout(self._groups_area)
+        layout.addStretch(1)
+        self._groups: list[tuple[list[Path], object]] = []
+        self._combos: list[QComboBox] = []
+        run = QPushButton("Spustiť hromadnú konverziu")
+        run.clicked.connect(self._run_batch)
+        self._run_button = run
+        run.setEnabled(False)
+        cancel = QPushButton("Zavrieť")
+        cancel.clicked.connect(self.reject)
+        layout.addWidget(run)
+        layout.addWidget(cancel)
+
+    def _pick_files(self) -> None:
+        chosen, _ = QFileDialog.getOpenFileNames(self, "Vybrať súbory")
+        if not chosen:
+            return
+        # Clear previous group widgets.
+        while self._groups_area.count():
+            item = self._groups_area.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self._groups = []
+        self._combos = []
+        grouped: dict[str, list[Path]] = {}
+        for item in chosen:
+            path = Path(item)
+            if path.is_file():
+                grouped.setdefault(path.suffix.lower(), []).append(path)
+        for suffix, files in sorted(grouped.items()):
+            actions = actions_for_file(files[0]) if files else []
+            box = QGroupBox(
+                f"{suffix or '(bez prípony)'} — {len(files)} súbor(ov)"
+            )
+            box_layout = QVBoxLayout(box)
+            names = QLabel(", ".join(p.name for p in files))
+            names.setWordWrap(True)
+            box_layout.addWidget(names)
+            if actions:
+                combo = QComboBox()
+                for label_text, _func in actions:
+                    combo.addItem(label_text)
+                box_layout.addWidget(combo)
+                self._combos.append(combo)
+                self._groups.append((files, combo))
+            else:
+                box_layout.addWidget(QLabel("Nepodporovaný typ — preskočí sa."))
+            self._groups_area.addWidget(box)
+        self._run_button.setEnabled(bool(self._groups))
+
+    def _run_batch(self) -> None:
+        total_ok = 0
+        total_fail = 0
+        for files, combo in self._groups:
+            actions = actions_for_file(files[0])
+            if combo.currentIndex() < 0 or combo.currentIndex() >= len(actions):
+                continue
+            _label, func = actions[combo.currentIndex()]
+            for path in files:
+                try:
+                    output = self._main._execute_file_action(func, path)
+                except Exception as exc:
+                    self._main.log(f"BATCH FAILED {path.name}: {exc}")
+                    total_fail += 1
+                else:
+                    self._main.log(f"BATCH Saved: {output}")
+                    self._main._record_history(path.name, output)
+                    total_ok += 1
+        QMessageBox.information(
+            self, "Hromadná konverzia hotová",
+            f"Hotovo: {total_ok} úspešných, {total_fail} zlyhaných.",
+        )
+        self.accept()
 
 
 class MainWindow(QMainWindow):
@@ -328,8 +544,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.4")
-        self.setMinimumSize(640, 620)
+        self.setWindowTitle("CONVERTOR-APP v0.5")
+        self.setMinimumSize(640, 700)
         self.setAcceptDrops(True)
         self._file: Path | None = None
         self._widget: FloatingWidget | None = None
@@ -348,25 +564,37 @@ class MainWindow(QMainWindow):
         top_row = QHBoxLayout()
         title = QLabel("CONVERTOR-APP")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        self._update_notice = QPushButton("Aktualizácia k dispozícii")
+        self._update_notice.setVisible(False)
+        self._update_notice.clicked.connect(self._run_update_from_notice)
         gear = QPushButton("⚙ Nastavenia")
         gear.clicked.connect(self._open_settings)
         top_row.addWidget(title)
         top_row.addStretch(1)
+        top_row.addWidget(self._update_notice)
         top_row.addWidget(gear)
         layout.addLayout(top_row)
 
         # --- 1. File ---------------------------------------------------
         file_box = QGroupBox("1. File (pick one, or drag it onto this window)")
-        file_layout = QHBoxLayout(file_box)
+        file_vbox = QVBoxLayout(file_box)
+        file_layout = QHBoxLayout()
         self._file_label = QLabel("No file picked yet.")
         self._file_label.setWordWrap(True)
         pick = QPushButton("Pick file…")
         pick.clicked.connect(self._pick_file)
         drop_button = QPushButton("Drop window…")
         drop_button.clicked.connect(self._open_drop_window)
+        batch_button = QPushButton("Hromadná konverzia…")
+        batch_button.clicked.connect(self._open_batch)
         file_layout.addWidget(self._file_label, stretch=1)
         file_layout.addWidget(pick)
         file_layout.addWidget(drop_button)
+        file_layout.addWidget(batch_button)
+        file_vbox.addLayout(file_layout)
+        self._file_info_label = QLabel("Žiadny súbor vybratý.")
+        self._file_info_label.setWordWrap(True)
+        file_vbox.addWidget(self._file_info_label)
         layout.addWidget(file_box)
 
         # --- 2. Output -------------------------------------------------
@@ -436,14 +664,81 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self._log)
         layout.addWidget(log_box)
 
+        # --- 6. History (session only, v0.5) ----------------------------
+        history_box = QGroupBox("Posledné konverzie (táto relácia)")
+        history_layout = QVBoxLayout(history_box)
+        self._history_list = QListWidget()
+        history_layout.addWidget(self._history_list)
+        self._last_output: Path | None = None
+        open_folder = QPushButton("Otvoriť priečinok")
+        open_folder.clicked.connect(self._open_output_folder)
+        history_layout.addWidget(open_folder)
+        layout.addWidget(history_box)
+
         self.setCentralWidget(root)
-        self.log("CONVERTOR-APP v0.4 ready. Pick a file, or paste text.")
+        self.log("CONVERTOR-APP v0.5 ready. Pick a file, or paste text.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
+        # Automatic update check (v0.5): after the window shows,
+        # so startup is not blocked. Silent unless an update is
+        # actually available — then the top-row notice appears.
+        QTimer.singleShot(1000, self._auto_update_check)
 
     # -- log ------------------------------------------------------------
     def log(self, message: str) -> None:
         self._log.appendPlainText(f"[{_stamp()}] {message}")
+
+    def _record_history(self, source_name: str, output: Path) -> None:
+        """Add a file → output entry to the session history list."""
+        self._last_output = Path(output)
+        self._history_list.addItem(f"{source_name} → {output.name}")
+        while self._history_list.count() > 50:
+            self._history_list.takeItem(0)
+
+    def _open_output_folder(self) -> None:
+        """Open the folder of the last successful conversion."""
+        if self._last_output is None:
+            QMessageBox.information(
+                self, "Otvoriť priečinok", "Zatiaľ žiadna konverzia v tejto relácii."
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_output.parent)))
+
+    def _open_batch(self) -> None:
+        """Open the batch conversion dialog (v0.5)."""
+        dialog = BatchDialog(self)
+        dialog.exec()
+
+    def _auto_update_check(self) -> None:
+        """Silent startup update check: notice only if available."""
+        try:
+            result = check_update()
+        except Exception:
+            return
+        if result.get("status") == "available":
+            self.log(
+                "Aktualizácia k dispozícii "
+                f"(aktuálna: {result.get('local', '')[:7]}, "
+                f"na GitHube: {result.get('remote', '')[:7]}). "
+                "Pozri Nastavenia → Aktualizácie."
+            )
+            self._update_notice.setVisible(True)
+
+    def _run_update_from_notice(self) -> None:
+        """Update from the top-row notice, then ask for a restart."""
+        result = run_update()
+        if result.get("success"):
+            self.log("Aktualizované — reštartuj appku.")
+            self._update_notice.setVisible(False)
+            QMessageBox.information(
+                self, "Aktualizované",
+                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+            )
+        else:
+            QMessageBox.warning(
+                self, "Aktualizácia zlyhala",
+                result.get("message", "Aktualizácia zlyhala."),
+            )
 
     # -- file picking / dropping -----------------------------------------
     # NOTE (v0.4): dropping onto the MAIN window still does NOT
@@ -459,21 +754,30 @@ class MainWindow(QMainWindow):
     def _set_file(self, path: Path) -> None:
         self._file = path
         self._file_label.setText(str(path))
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        label = _file_type_label(path)
+        self._file_info_label.setText(
+            f"{path.name} — {label or 'neznámy typ'} — {_format_size(size)}"
+        )
         self.log(f"Picked: {path.name}")
         self._rebuild_conversions()
 
     def _rebuild_conversions(self) -> None:
-        """Rebuild section 3 for the currently picked file (v0.4).
+        """Rebuild section 3 for the currently picked file (v0.4/0.5).
 
         No file: hint only, no buttons. Recognised file: a
         recognition label plus ONLY the actions that
-        actions_for_file() returns for it. Unknown type: a clear
+        actions_for_file() returns for it, each as a card: a
+        button plus a one-line description. Unknown type: a clear
         "not supported yet" message, no buttons, and a log line —
         never an empty list and never the full list.
         """
-        for button in self._conv_buttons:
-            self._conv_layout.removeWidget(button)
-            button.deleteLater()
+        for widget in self._conv_buttons:
+            self._conv_layout.removeWidget(widget)
+            widget.deleteLater()
         self._conv_buttons = []
         if self._file is None:
             self._recognition_label.setText(
@@ -499,12 +803,21 @@ class MainWindow(QMainWindow):
             else f"Rozpoznal som: {self._file.name} — môžeš z neho spraviť:"
         )
         for label_text, func in actions:
+            card = QWidget()
+            card_layout = QHBoxLayout(card)
+            card_layout.setContentsMargins(0, 0, 0, 0)
             button = QPushButton(label_text)
             button.clicked.connect(
                 lambda _=False, f=func: self._run_file_action(f)
             )
-            self._conv_layout.addWidget(button)
-            self._conv_buttons.append(button)
+            description = QLabel(
+                ACTION_DESCRIPTIONS.get(func, label_text)
+            )
+            description.setWordWrap(True)
+            card_layout.addWidget(button)
+            card_layout.addWidget(description, stretch=1)
+            self._conv_layout.addWidget(card)
+            self._conv_buttons.append(card)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -611,6 +924,31 @@ class MainWindow(QMainWindow):
         self.log("Drop window opened (drop a file there — it will ask what to do).")
 
     # -- actions -----------------------------------------------------------
+    def _action_kwargs(self, func) -> dict:
+        """Quality settings for image actions (v0.5); {} otherwise."""
+        if func is convert_to_jpg:
+            try:
+                return {"jpg_quality": int(self._settings.get("jpg_quality", 92))}
+            except (TypeError, ValueError):
+                return {"jpg_quality": 92}
+        if func is compress_image:
+            try:
+                return {"compress_quality": int(self._settings.get("compress_quality", 70))}
+            except (TypeError, ValueError):
+                return {"compress_quality": 70}
+        return {}
+
+    def _execute_file_action(self, func, target_file: Path) -> Path:
+        """Run one file action, no dialogs, no message boxes.
+
+        Used by the batch flow (and by the single-file flow when
+        "ask for output file" is off). Respects the Output
+        folder setting and the image quality settings; the
+        per-file Save dialog is deliberately not shown here.
+        """
+        output_dir = self._output_dir_value()
+        return func(target_file, output_dir=output_dir, **self._action_kwargs(func))
+
     def _run_file_action(self, func, file_path=None) -> None:
         """Run a file action, respecting the Output settings.
 
@@ -640,14 +978,18 @@ class MainWindow(QMainWindow):
                 if not chosen:
                     self.log("Output save cancelled.")
                     return
-                output = func(target_file, output_path=Path(chosen))
+                output = func(
+                    target_file, output_path=Path(chosen),
+                    **self._action_kwargs(func),
+                )
             else:
-                output = func(target_file, output_dir=output_dir)
+                output = self._execute_file_action(func, target_file)
         except Exception as exc:
             self.log(f"FAILED {target_file.name}: {exc}")
             QMessageBox.warning(self, "Failed", f"{exc}")
         else:
             self.log(f"Saved: {output}")
+            self._record_history(target_file.name, output)
             QMessageBox.information(self, "Done", f"Saved:\n{output.name}")
 
     def _paste_text(self) -> None:

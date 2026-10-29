@@ -53,6 +53,8 @@ def default_settings() -> dict:
         "ask_output_file": False,
         "text_folder": str(_desktop_default()),
         "show_widget_on_start": False,
+        "jpg_quality": 92,
+        "compress_quality": 70,
     }
 
 
@@ -87,6 +89,14 @@ def _sanitise(raw: object) -> dict:
     show = raw.get("show_widget_on_start")
     if isinstance(show, bool):
         settings["show_widget_on_start"] = show
+    for key, default in (("jpg_quality", 92), ("compress_quality", 70)):
+        value = raw.get(key)
+        if isinstance(value, bool):
+            continue
+        try:
+            settings[key] = max(10, min(int(value), 100))
+        except (TypeError, ValueError):
+            pass
     return settings
 
 
