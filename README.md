@@ -1,4 +1,4 @@
-# CONVERTOR-APP — v0.3
+# CONVERTOR-APP — v0.4
 
 A local desktop file converter, vibecoded from scratch as an
 original implementation. It is **inspired by** the idea of a desktop
@@ -22,6 +22,38 @@ was copied from any existing app of that kind.
    draggable widget. Drag a file onto it and a ring of actions
    opens around it. Toggle it from the main window
    ("Floating widget: show / hide").
+
+## What it does (v0.4 — new: smart Conversions)
+
+Section **3. Conversions** in the main window no longer shows
+all 18 buttons at once, regardless of file type. The flow is
+now exactly three steps:
+
+1. **Pick a file** — "Pick file…" in section 1, or drag a file
+   onto the main window. Picking / dropping still does NOT
+   convert anything by itself.
+2. **The app recognises it** — by file type, and shows a
+   recognition label in plain words, e.g. "Rozpoznal som:
+   Word dokument (.docx)", "PDF dokument (.pdf)", "Obrázok
+   (.png)", "LibreOffice Writer dokument (.odt)".
+3. **Only the suggested conversions are shown** — for a .docx
+   only DOCX → MD and DOCX → PDF, for an image only the five
+   image actions, and so on. Nothing that cannot work on the
+   picked file is offered.
+
+With **no file picked**, section 3 shows only a hint
+("Vyber súbor a ukážem len konverzie preň.") and no buttons.
+For an **unknown / unsupported type** (e.g. `.exe`) it shows
+a clear "Tento typ súboru zatiaľ nepodporujem" message, no
+buttons, and a log line — never an empty list and never the
+full list.
+
+The routing is the existing `actions_for_file()` from
+`actions.py` — the same routing the Drop window already uses,
+so there is no second list to drift out of sync. Everything
+else is unchanged: Output section + Settings sync, the gear
+"⚙ Nastavenia" button, Drop window behaviour, Text section,
+Log, and the never-overwrite rule.
 
 ## What it does (v0.3 — new features)
 
@@ -182,11 +214,17 @@ widget's **Text** button and save to the Desktop.
   on a headless Linux VM; a PySide6 live run was not possible
   there, and the GUI was only compile-checked). The user must
   run `python main.py` on his Windows PC and check: main
-  window opens (title v0.3), file pick + drop work, Output
+  window opens (title v0.4), file pick + drop work, Output
   folder + "ask for output file" work on an image and a
   document, Drop window opens / asks / runs / logs, each ODF
   conversion saves a new file, text saves default to Desktop,
   floating widget toggles, and the Log shows every result.
+  Also check the new smart Conversions: with no file picked,
+  section 3 shows only the hint and no buttons; picking a
+  .docx shows only DOCX → MD and DOCX → PDF with a
+  recognition label; picking an image shows only the five
+  image actions; an unsupported file (e.g. .exe) shows the
+  "not supported yet" message and no buttons.
   Also check Settings: the gear button "⚙ Nastavenia" is in
   the top row (title left, gear right), the dialog opens,
   Save persists and updates section 2, Cancel changes nothing,
@@ -212,8 +250,9 @@ beaver/
                         dialogs use the text_folder setting when
                         opened from the main window)
   gui.py                main window: top row (title + ⚙ Nastavenia
-                        gear button), File / Output / Conversions /
-                        Text / Log, plus Drop window + action
+                        gear button), File / Output / smart
+                        Conversions (dynamic, via actions_for_file)
+                        / Text / Log, plus Drop window + action
                         choice dialog + Settings dialog
   settings.py           user settings (stdlib only, no Qt):
                         ~/.convertor-app/settings.json, defaults

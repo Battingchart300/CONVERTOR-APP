@@ -1,4 +1,4 @@
-"""Main local GUI window for CONVERTOR-APP (v0.3).
+"""Main local GUI window for CONVERTOR-APP (v0.4).
 
 Written from scratch for this app, in PySide6. It is in the same
 spirit as a local launcher window — sections, buttons, and a
@@ -13,9 +13,12 @@ Sections:
      (default) or a chosen folder, plus "ask for output file
      before each conversion" (a Save dialog prefilled with the
      proposed name, so it can be renamed / relocated)
-  3. Conversions — buttons for the document/image actions that fit
-     the picked file (other buttons log a friendly "wrong file type"
-     instead of crashing)
+  3. Conversions — SMART (v0.4): no static list of all buttons.
+     With no file picked, only a hint is shown. Once a file is
+     picked (or dropped onto the main window), the app recognises
+     its type and shows ONLY the conversions that fit it, plus a
+     recognition label. An unsupported type shows a clear
+     "not supported yet" message and no buttons at all.
   4. Text — paste text, save it to the Desktop (default) as
      .md / .txt / .pdf, or copy it (unchanged from v0.2: pasted
      text keeps its own save dialog)
@@ -63,13 +66,6 @@ from PySide6.QtWidgets import (
 )
 
 from .actions import (
-    ACTIONS,
-    DOCX_ACTIONS,
-    MD_ACTIONS,
-    ODP_ACTIONS,
-    ODS_ACTIONS,
-    ODT_ACTIONS,
-    PDF_ACTIONS,
     actions_for_file,
     default_output_for,
     default_text_dir,
@@ -83,6 +79,33 @@ from .widget import FloatingWidget, TextDialog
 
 def _stamp() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+# Human-readable Slovak labels for the recognition line in the
+# Conversions section (v0.4). Image types share one wording with
+# the real extension shown, so ".jpg" reads as an image too.
+_FILE_TYPE_LABELS = {
+    ".md": "Markdown dokument (.md)",
+    ".markdown": "Markdown dokument (.md)",
+    ".pdf": "PDF dokument (.pdf)",
+    ".docx": "Word dokument (.docx)",
+    ".odt": "LibreOffice Writer dokument (.odt)",
+    ".ods": "LibreOffice Calc tabuľka (.ods)",
+    ".odp": "LibreOffice Impress prezentácia (.odp)",
+    ".png": "Obrázok (.png)",
+    ".jpg": "Obrázok (.jpg)",
+    ".jpeg": "Obrázok (.jpeg)",
+    ".bmp": "Obrázok (.bmp)",
+    ".gif": "Obrázok (.gif)",
+    ".webp": "Obrázok (.webp)",
+    ".tif": "Obrázok (.tif)",
+    ".tiff": "Obrázok (.tiff)",
+}
+
+
+def _file_type_label(path: Path) -> str:
+    """Plain-words label for a file type, or "" if unknown."""
+    return _FILE_TYPE_LABELS.get(path.suffix.lower(), "")
 
 
 class ActionChoiceDialog(QDialog):
@@ -305,7 +328,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.3")
+        self.setWindowTitle("CONVERTOR-APP v0.4")
         self.setMinimumSize(640, 620)
         self.setAcceptDrops(True)
         self._file: Path | None = None
@@ -376,23 +399,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(output_box)
         self._apply_settings_to_controls()
 
-        # --- 3. Conversions --------------------------------------------
-        conv_box = QGroupBox("3. Conversions (run on the picked file)")
-        conv_layout = QVBoxLayout(conv_box)
-        self._buttons: list[tuple[str, object]] = []
-        for label, func in (
-            [("PDF → MD", PDF_ACTIONS[0][1])]
-            + DOCX_ACTIONS
-            + ODT_ACTIONS
-            + ODS_ACTIONS
-            + ODP_ACTIONS
-            + MD_ACTIONS
-            + ACTIONS
-        ):
-            button = QPushButton(label)
-            button.clicked.connect(lambda _=False, f=func: self._run_file_action(f))
-            conv_layout.addWidget(button)
-            self._buttons.append((label, func))
+        # --- 3. Conversions (SMART, v0.4) ------------------------------
+        # No static list of all 18 buttons any more. The section is
+        # rebuilt by _rebuild_conversions() whenever the picked
+        # file changes: hint only with no file, only the fitting
+        # actions for a recognised file, and a "not supported yet"
+        # message (no buttons) for an unknown type. The routing is
+        # actions_for_file(), the same one the Drop window uses —
+        # there is no second routing table to drift out of sync.
+        conv_box = QGroupBox("3. Conversions (only for the picked file)")
+        self._conv_layout = QVBoxLayout(conv_box)
+        self._recognition_label = QLabel(
+            "Vyber súbor a ukážem len konverzie preň."
+        )
+        self._recognition_label.setWordWrap(True)
+        self._conv_layout.addWidget(self._recognition_label)
+        self._conv_buttons: list[QPushButton] = []
         layout.addWidget(conv_box)
 
         # --- 4. Text ----------------------------------------------------
@@ -415,7 +437,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(log_box)
 
         self.setCentralWidget(root)
-        self.log("CONVERTOR-APP v0.3 ready. Pick a file, or paste text.")
+        self.log("CONVERTOR-APP v0.4 ready. Pick a file, or paste text.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
 
@@ -424,9 +446,11 @@ class MainWindow(QMainWindow):
         self._log.appendPlainText(f"[{_stamp()}] {message}")
 
     # -- file picking / dropping -----------------------------------------
-    # NOTE: dropping onto the MAIN window still only SETS the picked
-    # file (unchanged from v0.2). The auto-ask behaviour lives only
-    # in the Drop window.
+    # NOTE (v0.4): dropping onto the MAIN window still does NOT
+    # convert anything by itself — it sets the picked file, and
+    # _rebuild_conversions() then suggests only the conversions
+    # that fit it. The auto-ask dialog behaviour lives only in
+    # the Drop window.
     def _pick_file(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(self, "Pick a file")
         if chosen:
@@ -436,6 +460,51 @@ class MainWindow(QMainWindow):
         self._file = path
         self._file_label.setText(str(path))
         self.log(f"Picked: {path.name}")
+        self._rebuild_conversions()
+
+    def _rebuild_conversions(self) -> None:
+        """Rebuild section 3 for the currently picked file (v0.4).
+
+        No file: hint only, no buttons. Recognised file: a
+        recognition label plus ONLY the actions that
+        actions_for_file() returns for it. Unknown type: a clear
+        "not supported yet" message, no buttons, and a log line —
+        never an empty list and never the full list.
+        """
+        for button in self._conv_buttons:
+            self._conv_layout.removeWidget(button)
+            button.deleteLater()
+        self._conv_buttons = []
+        if self._file is None:
+            self._recognition_label.setText(
+                "Vyber súbor a ukážem len konverzie preň."
+            )
+            return
+        actions = actions_for_file(self._file)
+        if not actions:
+            suffix = self._file.suffix.lower() or "(bez prípony)"
+            self._recognition_label.setText(
+                f"Tento typ súboru zatiaľ nepodporujem ({suffix}) — "
+                "žiadne konverzie preň nemám."
+            )
+            self.log(
+                f"No conversions for {self._file.name} "
+                f"({suffix}) — type not supported yet."
+            )
+            return
+        label = _file_type_label(self._file)
+        self._recognition_label.setText(
+            f"Rozpoznal som: {label} — môžeš z neho spraviť:"
+            if label
+            else f"Rozpoznal som: {self._file.name} — môžeš z neho spraviť:"
+        )
+        for label_text, func in actions:
+            button = QPushButton(label_text)
+            button.clicked.connect(
+                lambda _=False, f=func: self._run_file_action(f)
+            )
+            self._conv_layout.addWidget(button)
+            self._conv_buttons.append(button)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
