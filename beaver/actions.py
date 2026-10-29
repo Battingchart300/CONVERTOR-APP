@@ -19,16 +19,57 @@ from pathlib import Path
 from PIL import Image
 
 
-def _unique_output(original: Path, suffix: str, extension: str) -> Path:
-    """Return a non-existing output path next to ``original``."""
-    candidate = original.with_name(f"{original.stem}{suffix}.{extension}")
+def _unique_output(
+    original: Path, suffix: str, extension: str, output_dir=None
+) -> Path:
+    """Return a non-existing output path.
+
+    By default next to ``original``; if ``output_dir`` is given, in
+    that folder instead (created if needed). The original is never
+    overwritten: an existing target name gets ``_2``, ``_3``, ...
+    """
+    directory = Path(output_dir) if output_dir is not None else original.parent
+    if output_dir is not None:
+        directory.mkdir(parents=True, exist_ok=True)
+    candidate = directory / f"{original.stem}{suffix}.{extension}"
     counter = 2
     while candidate.exists():
-        candidate = original.with_name(
-            f"{original.stem}{suffix}_{counter}.{extension}"
-        )
+        candidate = directory / f"{original.stem}{suffix}_{counter}.{extension}"
         counter += 1
     return candidate
+
+
+def _resolve_target(
+    original: Path,
+    suffix: str,
+    extension: str,
+    output_dir=None,
+    output_path=None,
+) -> Path:
+    """Central output resolution for every file action (v0.3).
+
+    ``output_path`` (a user-chosen Save-dialog path) wins over
+    ``output_dir`` (a chosen output folder), which wins over the
+    default (next to the original). In all cases the extension is
+    forced to the action's real output format, the parent folder is
+    created if needed, and the _2/_3 rule applies — so a chosen path
+    that already exists is never overwritten either.
+    """
+    if output_path is not None:
+        chosen = Path(output_path)
+        if chosen.suffix.lower() != f".{extension}":
+            chosen = chosen.with_suffix(f".{extension}")
+        chosen.parent.mkdir(parents=True, exist_ok=True)
+        return unique_for_chosen(chosen)
+    return _unique_output(original, suffix, extension, output_dir=output_dir)
+
+
+def _image_extension(original: Path) -> str:
+    """Normalised image extension for compress / strip (jpg/jpeg -> jpg)."""
+    extension = original.suffix.lstrip(".").lower() or "png"
+    if extension in ("jpg", "jpeg"):
+        extension = "jpg"
+    return extension
 
 
 def _open_image(path: Path) -> Image.Image:
@@ -40,36 +81,40 @@ def _open_image(path: Path) -> Image.Image:
     return image
 
 
-def convert_to_png(source: str | os.PathLike) -> Path:
-    """Convert an image to PNG, next to the original."""
+def convert_to_png(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert an image to PNG (default: next to the original)."""
     original = Path(source)
     image = _open_image(original)
-    target = _unique_output(original, "_converted", "png")
+    target = _resolve_target(original, "_converted", "png", output_dir, output_path)
     image.convert("RGBA").save(target, format="PNG")
     return target
 
 
-def convert_to_jpg(source: str | os.PathLike) -> Path:
-    """Convert an image to JPG (quality 92), next to the original."""
+def convert_to_jpg(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert an image to JPG (quality 92; default: next to original)."""
     original = Path(source)
     image = _open_image(original)
-    target = _unique_output(original, "_converted", "jpg")
+    target = _resolve_target(original, "_converted", "jpg", output_dir, output_path)
     image.convert("RGB").save(target, format="JPEG", quality=92)
     return target
 
 
-def compress_image(source: str | os.PathLike) -> Path:
-    """Save a smaller version of the image, next to the original.
+def compress_image(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Save a smaller version of the image (default: next to original).
 
     JPEGs are re-saved at quality 70. Other formats are re-saved
     with Pillow's ``optimize`` flag. Dimensions are unchanged in v0.1.
     """
     original = Path(source)
     image = _open_image(original)
-    extension = original.suffix.lstrip(".").lower() or "png"
-    if extension in ("jpg", "jpeg"):
-        extension = "jpg"
-    target = _unique_output(original, "_compressed", extension)
+    extension = _image_extension(original)
+    target = _resolve_target(original, "_compressed", extension, output_dir, output_path)
     if extension == "jpg":
         image.convert("RGB").save(target, format="JPEG", quality=70, optimize=True)
     else:
@@ -77,7 +122,9 @@ def compress_image(source: str | os.PathLike) -> Path:
     return target
 
 
-def strip_metadata(source: str | os.PathLike) -> Path:
+def strip_metadata(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Save a copy of the image with no EXIF / GPS / text metadata.
 
     The pixel data is copied into a fresh image object and saved
@@ -86,10 +133,8 @@ def strip_metadata(source: str | os.PathLike) -> Path:
     """
     original = Path(source)
     image = _open_image(original)
-    extension = original.suffix.lstrip(".").lower() or "png"
-    if extension in ("jpg", "jpeg"):
-        extension = "jpg"
-    target = _unique_output(original, "_clean", extension)
+    extension = _image_extension(original)
+    target = _resolve_target(original, "_clean", extension, output_dir, output_path)
     clean = Image.new(image.mode, image.size)
     clean.paste(image)
     if extension == "jpg":
@@ -99,7 +144,9 @@ def strip_metadata(source: str | os.PathLike) -> Path:
     return target
 
 
-def add_white_background(source: str | os.PathLike) -> Path:
+def add_white_background(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Composite a (possibly transparent) image onto white.
 
     Images without transparency are simply copied under a new name,
@@ -107,7 +154,7 @@ def add_white_background(source: str | os.PathLike) -> Path:
     """
     original = Path(source)
     image = _open_image(original)
-    target = _unique_output(original, "_whitebg", "png")
+    target = _resolve_target(original, "_whitebg", "png", output_dir, output_path)
     if image.mode in ("RGBA", "LA") or (
         image.mode == "P" and "transparency" in image.info
     ):
@@ -165,7 +212,9 @@ def unique_for_chosen(chosen: Path) -> Path:
         counter += 1
 
 
-def md_to_html(source: str | os.PathLike) -> Path:
+def md_to_html(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Convert a .md file to a standalone .html file, next to it."""
     import markdown
 
@@ -179,7 +228,7 @@ def md_to_html(source: str | os.PathLike) -> Path:
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
         f"<title>{title}</title>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
-    target = _unique_output(original, "_converted", "html")
+    target = _resolve_target(original, "_converted", "html", output_dir, output_path)
     target.write_text(document, encoding="utf-8")
     return target
 
@@ -222,15 +271,19 @@ def strip_markdown(text: str) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def md_to_txt(source: str | os.PathLike) -> Path:
+def md_to_txt(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Convert a .md file to plain .txt, next to the original."""
     original = Path(source)
-    target = _unique_output(original, "_converted", "txt")
+    target = _resolve_target(original, "_converted", "txt", output_dir, output_path)
     target.write_text(strip_markdown(_read_text(original)), encoding="utf-8")
     return target
 
 
-def clean_md(source: str | os.PathLike) -> Path:
+def clean_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Write a cleaned copy of a .md file: no trailing whitespace.
 
     Only whitespace is changed: trailing spaces/tabs per line are
@@ -251,7 +304,7 @@ def clean_md(source: str | os.PathLike) -> Path:
         cleaned.append(line)
     while cleaned and cleaned[-1] == "":
         cleaned.pop()
-    target = _unique_output(original, "_clean", "md")
+    target = _resolve_target(original, "_clean", "md", output_dir, output_path)
     target.write_text("\n".join(cleaned) + "\n", encoding="utf-8")
     return target
 
@@ -410,7 +463,9 @@ def _md_lines_to_pdf(lines: list[str], target: Path) -> Path:
     return target
 
 
-def pdf_to_md(source: str | os.PathLike) -> Path:
+def pdf_to_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Extract a PDF's text into a Markdown file, next to it."""
     try:
         import pymupdf
@@ -426,7 +481,7 @@ def pdf_to_md(source: str | os.PathLike) -> Path:
         for index, page in enumerate(doc, start=1):
             text = page.get_text().strip()
             parts.append(f"\n## Page {index}\n\n{text}\n" if text else f"\n## Page {index}\n\n")
-    target = _unique_output(original, "_converted", "md")
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
     target.write_text("\n".join(parts), encoding="utf-8")
     return target
 
@@ -465,7 +520,9 @@ def _docx_tables_to_md(source: Path) -> list[str]:
     return blocks
 
 
-def docx_to_md(source: str | os.PathLike) -> Path:
+def docx_to_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Convert a Word (.docx) file to Markdown, next to it."""
     original = Path(source)
     lines = [f"# {original.stem}\n"]
@@ -481,7 +538,7 @@ def docx_to_md(source: str | os.PathLike) -> Path:
         else:
             lines.append(text)
     lines.extend(_docx_tables_to_md(original))
-    target = _unique_output(original, "_converted", "md")
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
     target.write_text("\n".join(lines), encoding="utf-8")
     return target
 
@@ -503,17 +560,21 @@ def _docx_to_md_lines(source: Path) -> list[str]:
     return lines
 
 
-def md_to_pdf(source: str | os.PathLike) -> Path:
+def md_to_pdf(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Convert a .md file to PDF (simple text/headings/lists layout)."""
     original = Path(source)
-    target = _unique_output(original, "_converted", "pdf")
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
     return _md_lines_to_pdf(_read_text(original).splitlines(), target)
 
 
-def docx_to_pdf(source: str | os.PathLike) -> Path:
+def docx_to_pdf(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
     """Convert a Word (.docx) file to PDF (text/headings/lists only)."""
     original = Path(source)
-    target = _unique_output(original, "_converted", "pdf")
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
     return _md_lines_to_pdf(_docx_to_md_lines(original), target)
 
 
@@ -530,6 +591,284 @@ def text_to_pdf(text: str, directory: str | os.PathLike) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     target = _unique_named(folder, f"text-{date.today().isoformat()}", "", "pdf")
     return _md_lines_to_pdf(text.splitlines(), target)
+
+
+# ---------------------------------------------------------------------------
+# OpenDocument / LibreOffice conversions (v0.3).
+# ONLY Python stdlib: zipfile + xml.etree. Deliberately NO odfpy (and
+# nothing added to requirements.txt) — the user is wary of crashes
+# after library updates, so this part has zero new dependencies.
+# An ODF file is a ZIP whose content.xml holds the document.
+# Honest limitations, same as DOCX: text, headings, simple lists
+# and simple tables only. Images, styles, exact layout, tracked
+# changes, formulas (values are read where present as text) and
+# embedded objects are NOT preserved.
+# ---------------------------------------------------------------------------
+
+
+def _local(tag: str) -> str:
+    """Local name of an XML tag, ignoring its namespace."""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _odf_text(element) -> str:
+    """Plain text of an ODF element, honouring spaces/tabs/line breaks."""
+    parts: list[str] = []
+    if element.text:
+        parts.append(element.text)
+    for child in element:
+        name = _local(child.tag)
+        if name == "s":
+            try:
+                count = int(child.attrib.get("c", "1"))
+            except ValueError:
+                count = 1
+            parts.append(" " * max(1, min(count, 100)))
+        elif name == "tab":
+            parts.append("\t")
+        elif name == "line-break":
+            parts.append("\n")
+        else:
+            parts.append(_odf_text(child))
+        if child.tail:
+            parts.append(child.tail)
+    return "".join(parts)
+
+
+def _odf_root(source: Path):
+    """Parse content.xml from an ODF zip, or raise ValueError."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    try:
+        with zipfile.ZipFile(source) as archive:
+            try:
+                data = archive.read("content.xml")
+            except KeyError as exc:
+                raise ValueError(
+                    f"Not a readable OpenDocument file (no content.xml): {source.name}"
+                ) from exc
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"Not a readable OpenDocument file: {source.name}") from exc
+    try:
+        return ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise ValueError(f"Not a readable OpenDocument file: {source.name}") from exc
+
+
+def _odf_body(root):
+    """The office:text / office:spreadsheet / office:presentation node."""
+    for element in root.iter():
+        if _local(element.tag) in ("text", "spreadsheet", "presentation"):
+            return element
+    return root
+
+
+def _repeat(attrib: dict, key: str, default: int = 1) -> int:
+    try:
+        return max(1, min(int(attrib.get(key, default)), 100))
+    except (TypeError, ValueError):
+        return default
+
+
+def _collect_blocks(element, lines: list[str], list_depth: int = 0) -> None:
+    """Append Markdown lines for ODF block elements, in document order.
+
+    Handles paragraphs, headings, lists and tables; anything else
+    (frames, sections, shapes) is walked into, so text inside them
+    is not lost. Nested lists are indented by depth.
+    """
+    name = _local(element.tag)
+    if name == "p":
+        text = _odf_text(element).strip()
+        if text:
+            # list_depth is 1 for top-level list items, 2 for nested,
+            # 0 for plain paragraphs: top-level items get "- ", nested
+            # ones get an extra 2-space indent per level.
+            prefix = ("  " * (list_depth - 1) + "- ") if list_depth else ""
+            lines.append(prefix + text)
+        return
+    if name == "h":
+        text = _odf_text(element).strip()
+        if text:
+            try:
+                level = max(1, min(int(element.attrib.get("outline-level", "1")), 6))
+            except ValueError:
+                level = 1
+            lines.append("#" * level + " " + text)
+        return
+    if name == "list":
+        for item in element:
+            if _local(item.tag) != "list-item":
+                continue
+            for child in item:
+                _collect_blocks(child, lines, list_depth + 1)
+        return
+    if name == "table":
+        rows = []
+        for row in element:
+            if _local(row.tag) != "table-row":
+                continue
+            cells: list[str] = []
+            for cell in row:
+                if _local(cell.tag) != "table-cell":
+                    continue
+                text = " ".join(
+                    _odf_text(p).strip()
+                    for p in cell.iter()
+                    if _local(p.tag) in ("p", "h")
+                )
+                cells.extend([text] * _repeat(cell.attrib, "number-columns-repeated"))
+            if any(cells):
+                rows.append(cells)
+        if rows:
+            width = max(len(r) for r in rows)
+            rows = [r + [""] * (width - len(r)) for r in rows]
+            lines.append("| " + " | ".join(rows[0]) + " |")
+            lines.append("| " + " | ".join("---" for _ in rows[0]) + " |")
+            for row in rows[1:]:
+                lines.append("| " + " | ".join(row) + " |")
+            lines.append("")
+        return
+    for child in element:
+        _collect_blocks(child, lines, list_depth)
+
+
+def _odt_to_md_lines(source: Path) -> list[str]:
+    root = _odf_root(source)
+    lines = [f"# {source.stem}\n"]
+    _collect_blocks(_odf_body(root), lines)
+    return lines
+
+
+def _odp_to_md_lines(source: Path) -> list[str]:
+    root = _odf_root(source)
+    body = _odf_body(root)
+    lines = [f"# {source.stem}\n"]
+    pages = [e for e in body.iter() if _local(e.tag) == "page"]
+    if not pages:
+        _collect_blocks(body, lines)
+        return lines
+    for index, page in enumerate(pages, start=1):
+        name = page.attrib.get("name", "")
+        lines.append(f"\n## Slide {index}" + (f" — {name}" if name else "") + "\n")
+        _collect_blocks(page, lines)
+    return lines
+
+
+def _ods_sheets(source: Path) -> list[tuple[str, list[list[str]]]]:
+    """(sheet name, rows) for every spreadsheet table in an ODS file."""
+    root = _odf_root(source)
+    body = _odf_body(root)
+    sheets = []
+    for table in body.iter():
+        if _local(table.tag) != "table":
+            continue
+        name = table.attrib.get("name", "Sheet")
+        rows: list[list[str]] = []
+        for row in table:
+            if _local(row.tag) != "table-row":
+                continue
+            cells: list[str] = []
+            for cell in row:
+                if _local(cell.tag) != "table-cell":
+                    continue
+                text = " ".join(
+                    _odf_text(p).strip()
+                    for p in cell.iter()
+                    if _local(p.tag) in ("p", "h")
+                )
+                cells.extend([text] * _repeat(cell.attrib, "number-columns-repeated"))
+            repeat = _repeat(row.attrib, "number-rows-repeated")
+            for _ in range(repeat):
+                rows.append(list(cells))
+        # Drop fully-empty trailing rows, keep the sheet if it has data.
+        while rows and not any(rows[-1]):
+            rows.pop()
+        sheets.append((name, rows))
+    return sheets
+
+
+def _ods_to_md_lines(source: Path) -> list[str]:
+    lines = [f"# {source.stem}\n"]
+    for name, rows in _ods_sheets(source):
+        lines.append(f"\n## {name}\n")
+        if not rows:
+            continue
+        width = max(len(r) for r in rows)
+        rows = [r + [""] * (width - len(r)) for r in rows]
+        lines.append("| " + " | ".join(rows[0]) + " |")
+        lines.append("| " + " | ".join("---" for _ in rows[0]) + " |")
+        for row in rows[1:]:
+            lines.append("| " + " | ".join(row) + " |")
+    return lines
+
+
+def odt_to_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Writer (.odt) file to Markdown."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(_odt_to_md_lines(original)), encoding="utf-8")
+    return target
+
+
+def odt_to_pdf(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Writer (.odt) file to PDF (text only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(_odt_to_md_lines(original), target)
+
+
+def ods_to_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Calc (.ods) file to Markdown tables."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(_ods_to_md_lines(original)), encoding="utf-8")
+    return target
+
+
+def ods_to_csv(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Calc (.ods) file to CSV (first sheet only)."""
+    import csv
+    import io
+
+    original = Path(source)
+    sheets = _ods_sheets(original)
+    target = _resolve_target(original, "_converted", "csv", output_dir, output_path)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    if sheets:
+        for row in sheets[0][1]:
+            writer.writerow(row)
+    target.write_text(buffer.getvalue(), encoding="utf-8", newline="")
+    return target
+
+
+def odp_to_md(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Impress (.odp) file to Markdown, per slide."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "md", output_dir, output_path)
+    target.write_text("\n".join(_odp_to_md_lines(original)), encoding="utf-8")
+    return target
+
+
+def odp_to_pdf(
+    source: str | os.PathLike, output_dir=None, output_path=None
+) -> Path:
+    """Convert a LibreOffice Impress (.odp) file to PDF (text only)."""
+    original = Path(source)
+    target = _resolve_target(original, "_converted", "pdf", output_dir, output_path)
+    return _md_lines_to_pdf(_odp_to_md_lines(original), target)
 
 
 # Action id -> (button label, function), used by the ring menu.
@@ -560,3 +899,90 @@ DOCX_ACTIONS = [
     ("DOCX → MD", docx_to_md),
     ("DOCX → PDF", docx_to_pdf),
 ]
+
+# LibreOffice / OpenDocument files (v0.3, stdlib only).
+ODT_ACTIONS = [
+    ("ODT → MD", odt_to_md),
+    ("ODT → PDF", odt_to_pdf),
+]
+
+ODS_ACTIONS = [
+    ("ODS → MD", ods_to_md),
+    ("ODS → CSV", ods_to_csv),
+]
+
+ODP_ACTIONS = [
+    ("ODP → MD", odp_to_md),
+    ("ODP → PDF", odp_to_pdf),
+]
+
+_IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff",
+}
+
+
+def actions_for_file(path: str | os.PathLike) -> list:
+    """Only the actions that fit this file type (used by Drop window).
+
+    Unknown extensions return [] instead of the image ring, so the
+    Drop window never offers an action that cannot work on the file.
+    Single-argument calls still work for every returned function.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix in (".md", ".markdown"):
+        return list(MD_ACTIONS)
+    if suffix == ".pdf":
+        return list(PDF_ACTIONS)
+    if suffix == ".docx":
+        return list(DOCX_ACTIONS)
+    if suffix == ".odt":
+        return list(ODT_ACTIONS)
+    if suffix == ".ods":
+        return list(ODS_ACTIONS)
+    if suffix == ".odp":
+        return list(ODP_ACTIONS)
+    if suffix in _IMAGE_EXTENSIONS:
+        return list(ACTIONS)
+    return []
+
+
+# (suffix, extension) per file action, for the "ask for output file"
+# Save dialog prefill. Compress / strip keep the source extension.
+_ACTION_OUTPUT = {
+    convert_to_png: ("_converted", "png"),
+    convert_to_jpg: ("_converted", "jpg"),
+    add_white_background: ("_whitebg", "png"),
+    md_to_pdf: ("_converted", "pdf"),
+    clean_md: ("_clean", "md"),
+    md_to_txt: ("_converted", "txt"),
+    md_to_html: ("_converted", "html"),
+    pdf_to_md: ("_converted", "md"),
+    docx_to_md: ("_converted", "md"),
+    docx_to_pdf: ("_converted", "pdf"),
+    odt_to_md: ("_converted", "md"),
+    odt_to_pdf: ("_converted", "pdf"),
+    ods_to_md: ("_converted", "md"),
+    ods_to_csv: ("_converted", "csv"),
+    odp_to_md: ("_converted", "md"),
+    odp_to_pdf: ("_converted", "pdf"),
+}
+
+
+def default_output_for(source, func, output_dir=None) -> Path:
+    """Proposed (non-existing) output path for ``func`` on ``source``.
+
+    Used to prefill the Save dialog when "ask for output file" is on.
+    Respects the chosen output folder; the _2/_3 rule applies here
+    too, so the prefilled name is one that does not exist yet.
+    """
+    original = Path(source)
+    if func in (compress_image, strip_metadata):
+        suffix = "_compressed" if func is compress_image else "_clean"
+        return _unique_output(
+            original, suffix, _image_extension(original), output_dir=output_dir
+        )
+    try:
+        suffix, extension = _ACTION_OUTPUT[func]
+    except KeyError as exc:
+        raise ValueError(f"No default output known for this action: {func}") from exc
+    return _unique_output(original, suffix, extension, output_dir=output_dir)

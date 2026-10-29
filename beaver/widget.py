@@ -30,6 +30,9 @@ from .actions import (
     ACTIONS,
     DOCX_ACTIONS,
     MD_ACTIONS,
+    ODP_ACTIONS,
+    ODS_ACTIONS,
+    ODT_ACTIONS,
     PDF_ACTIONS,
     default_text_dir,
     default_text_filename,
@@ -122,7 +125,7 @@ class FloatingWidget(QWidget):
     text can be used with no file at all.
     """
 
-    def __init__(self):
+    def __init__(self, text_dir=None):
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
@@ -132,6 +135,17 @@ class FloatingWidget(QWidget):
         self.setGeometry(100, 100, 72, 106)
         self._drag_offset = QPoint()
         self._ring: RingMenu | None = None
+        # Default folder for the widget's own paste dialogs. The
+        # main window passes its text_folder setting; standalone
+        # use (widget main) keeps the Desktop default.
+        self._text_dir: Path = (
+            Path(text_dir) if text_dir is not None else default_text_dir()
+        )
+
+    def set_text_dir(self, text_dir) -> None:
+        """Update the paste-dialog default folder (Settings change)."""
+        if text_dir is not None:
+            self._text_dir = Path(text_dir)
 
         # Original icon drawn in code: a plain circle with an emoji
         # label. No third-party artwork is embedded anywhere.
@@ -175,11 +189,13 @@ class FloatingWidget(QWidget):
     def _save_text(self, text: str, kind: str):
         """Save pasted text via a dialog with a sensible default name.
 
-        The dialog defaults to Documents (else home) and a
-        ``text-<date>.<ext>`` name. If the chosen file already exists,
-        save_text_to_path applies the _2/_3 rule instead of overwriting.
+        The dialog defaults to the widget's text folder (the main
+        window's text_folder setting, else the Desktop default)
+        and a ``text-<date>.<ext>`` name. If the chosen file already
+        exists, save_text_to_path applies the _2/_3 rule instead of
+        overwriting.
         """
-        default = str(default_text_dir() / default_text_filename(kind))
+        default = str(self._text_dir / default_text_filename(kind))
         filters = {
             "md": "Markdown (*.md)",
             "txt": "Text (*.txt)",
@@ -191,8 +207,8 @@ class FloatingWidget(QWidget):
         return save_text_to_path(text, chosen, kind)
 
     def _save_pasted_pdf(self, text: str):
-        """Save pasted text as PDF, dialog defaults to the Desktop."""
-        default = str(default_text_dir() / default_text_filename("pdf"))
+        """Save pasted text as PDF, dialog defaults to the text folder."""
+        default = str(self._text_dir / default_text_filename("pdf"))
         chosen, _ = QFileDialog.getSaveFileName(
             self, "Save text as PDF", default, "PDF (*.pdf)"
         )
@@ -228,9 +244,12 @@ class FloatingWidget(QWidget):
         if not file_path.is_file():
             QMessageBox.warning(self, "Failed", "Drop a single file, not a folder.")
             return
-        # Route by extension (v0.2): .md -> MD ring, .pdf -> PDF ring,
-        # .docx -> Word ring, everything else keeps the v0.1 image
-        # ring, which fails gracefully on non-images.
+        # Route by extension (v0.3 adds .odt/.ods/.odp): .md -> MD
+        # ring, .pdf -> PDF ring, .docx -> Word ring, .odt/.ods/.odp
+        # -> LibreOffice rings, everything else keeps the v0.1 image
+        # ring, which fails gracefully on non-images. Single-argument
+        # calls still work: the new output_dir / output_path
+        # parameters in actions.py are optional.
         suffix = file_path.suffix.lower()
         if suffix in (".md", ".markdown"):
             actions = MD_ACTIONS
@@ -238,6 +257,12 @@ class FloatingWidget(QWidget):
             actions = PDF_ACTIONS
         elif suffix == ".docx":
             actions = DOCX_ACTIONS
+        elif suffix == ".odt":
+            actions = ODT_ACTIONS
+        elif suffix == ".ods":
+            actions = ODS_ACTIONS
+        elif suffix == ".odp":
+            actions = ODP_ACTIONS
         else:
             actions = ACTIONS
         items = [
