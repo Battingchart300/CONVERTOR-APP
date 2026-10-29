@@ -1,4 +1,4 @@
-"""Main local GUI window for CONVERTOR-APP (v0.5).
+"""Main local GUI window for CONVERTOR-APP (v0.5.1).
 
 Written from scratch for this app, in PySide6. It is in the same
 spirit as a local launcher window — sections, buttons, and a
@@ -89,7 +89,7 @@ from .actions import (
     text_to_pdf_path,
 )
 from .settings import default_settings, load_settings, save_settings
-from .update_check import check_update, run_update
+from .update_check import check_update, local_version, run_update
 from .widget import FloatingWidget, TextDialog
 
 
@@ -367,21 +367,25 @@ class SettingsDialog(QDialog):
         self._on_folder_toggled()
 
     def _check_updates(self) -> None:
-        """Manual update check: status text + enable Update if available."""
+        """Manual update check: status text + enable Update if available.
+
+        Version numbers only, never commit SHAs (v0.5.1): the SHAs
+        in the check result are for the internal comparison only.
+        """
         result = check_update()
-        local = result.get("local", "")
-        remote = result.get("remote", "")
-        short_local = local[:7] if local else "?"
-        short_remote = remote[:7] if remote else "?"
+        shown_local = result.get("local_version") or local_version() or "?"
         if result["status"] == "up_to_date":
             self._update_status.setText(
-                f"Aktuálna verzia: {short_local} — Máš najnovšiu verziu."
+                f"Aktuálna verzia: {shown_local} — Máš najnovšiu verziu."
             )
         elif result["status"] == "available":
-            self._update_status.setText(
-                f"Aktuálna: {short_local}, na GitHube: {short_remote} — "
-                "K dispozícii je aktualizácia."
-            )
+            shown_remote = result.get("remote_version")
+            if shown_remote:
+                self._update_status.setText(
+                    f"Je k dispozícii nová verzia: {shown_remote}."
+                )
+            else:
+                self._update_status.setText("Je k dispozícii novšia verzia.")
         else:
             self._update_status.setText(result.get("message", "Kontrola sa nepodarila."))
         self._update_button.setEnabled(result["status"] == "available")
@@ -544,7 +548,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.5")
+        self.setWindowTitle("CONVERTOR-APP v0.5.1")
         self.setMinimumSize(640, 700)
         self.setAcceptDrops(True)
         self._file: Path | None = None
@@ -676,7 +680,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(history_box)
 
         self.setCentralWidget(root)
-        self.log("CONVERTOR-APP v0.5 ready. Pick a file, or paste text.")
+        self.log("CONVERTOR-APP v0.5.1 ready. Pick a file, or paste text.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
         # Automatic update check (v0.5): after the window shows,
@@ -716,12 +720,17 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         if result.get("status") == "available":
-            self.log(
-                "Aktualizácia k dispozícii "
-                f"(aktuálna: {result.get('local', '')[:7]}, "
-                f"na GitHube: {result.get('remote', '')[:7]}). "
-                "Pozri Nastavenia → Aktualizácie."
-            )
+            shown_remote = result.get("remote_version")
+            if shown_remote:
+                self.log(
+                    f"Aktualizácia k dispozícii: nová verzia {shown_remote}. "
+                    "Pozri Nastavenia → Aktualizácie."
+                )
+            else:
+                self.log(
+                    "Aktualizácia k dispozícii: novšia verzia. "
+                    "Pozri Nastavenia → Aktualizácie."
+                )
             self._update_notice.setVisible(True)
 
     def _run_update_from_notice(self) -> None:

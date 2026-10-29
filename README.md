@@ -1,4 +1,4 @@
-# CONVERTOR-APP — v0.5
+# CONVERTOR-APP — v0.5.1
 
 A local desktop file converter, vibecoded from scratch as an
 original implementation. It is **inspired by** the idea of a desktop
@@ -22,6 +22,20 @@ was copied from any existing app of that kind.
    draggable widget. Drag a file onto it and a ring of actions
    opens around it. Toggle it from the main window
    ("Floating widget: show / hide").
+
+### v0.5.1 patch — update display shows versions, not commit hashes
+
+The update status used to read a short commit hash after
+"Aktuálna verzia:".
+It now reads the real version (e.g. v0.5.1) and never shows a
+commit hash in the UI, log, or update notice. Commit SHAs are
+still used internally for the up-to-date/available comparison
+only; if the remote version cannot be parsed, the wording
+falls back to "novšia verzia" with no hash and no number.
+This is a patch release on purpose: otherwise an old v0.5
+build and the fixed v0.5 build would both display "v0.5"
+while the SHA-based update check reported an update, which
+would be confusing.
 
 ## What it does (v0.5 — new: more files, refined GUI, better functions, update check)
 
@@ -92,7 +106,8 @@ was copied from any existing app of that kind.
   button, which runs the update on click.
 - **Manual:** Settings → **Aktualizácie** has a
   "Skontrolovať aktualizácie" button, a status line (current
-  commit, remote commit, up-to-date / available / offline)
+  version, remote version, up-to-date / available / offline —
+  version numbers only, never commit hashes, since v0.5.1)
   and an "Aktualizovať" button, enabled only when an update
   is available. Updating runs `git pull origin main` and
   then tells the user to restart the app — the app does
@@ -305,7 +320,7 @@ widget's **Text** button and save to the Desktop.
   on a headless Linux VM; a PySide6 live run was not possible
   there, and the GUI was only compile-checked). The user must
   run `python main.py` on his Windows PC and check: main
-  window opens (title v0.5), file pick + drop work, Output
+  window opens (title v0.5.1), file pick + drop work, Output
   folder + "ask for output file" work on an image and a
   document, Drop window opens / asks / runs / logs, each ODF
   conversion saves a new file, text saves default to Desktop,

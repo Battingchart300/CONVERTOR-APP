@@ -1,4 +1,4 @@
-"""Update checking for CONVERTOR-APP (v0.5).
+"""Update checking for CONVERTOR-APP (v0.5.1).
 
 Stdlib + git subprocess only, no new dependency, no network
 library of its own. Everything is best-effort: a missing git
@@ -13,12 +13,42 @@ the remote refs, then local HEAD and origin/main are compared.
 Updating is a plain ``git pull origin main``; the app does NOT
 restart itself — after a successful pull it tells the user to
 restart, because on Windows the running .py files may be locked.
+
+Display rule (v0.5.1): commit SHAs are used ONLY internally
+for the up-to-date/available comparison. Every user-visible
+string shows version numbers (parsed from ``beaver/__init__.py``,
+locally and from ``origin/main``) and never a SHA. If the
+remote version cannot be parsed, the wording falls back to
+"novšia verzia" with no SHA and no version number.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
+
+_VERSION_RE = re.compile(r"\bv(\d+(?:\.\d+){1,2})\b")
+
+
+def parse_version(text: str) -> str | None:
+    """Parse a version like ``v0.5.1`` out of file text, or None."""
+    if not text:
+        return None
+    match = _VERSION_RE.search(text)
+    return f"v{match.group(1)}" if match else None
+
+
+def local_version() -> str | None:
+    """Version string of this build, from beaver/__init__.py."""
+    try:
+        return parse_version(
+            (Path(__file__).resolve().parent / "__init__.py").read_text(
+                encoding="utf-8"
+            )
+        )
+    except OSError:
+        return None
 
 FETCH_TIMEOUT = 10
 PULL_TIMEOUT = 60
@@ -61,6 +91,8 @@ def check_update(repo_dir: Path | None = None, timeout: int = FETCH_TIMEOUT) -> 
             "is_repo": False,
             "local": "",
             "remote": "",
+            "local_version": local_version(),
+            "remote_version": None,
             "message": "Nie je git repozitár — kontrola aktualizácie nie je možná.",
         }
     try:
@@ -80,14 +112,30 @@ def check_update(repo_dir: Path | None = None, timeout: int = FETCH_TIMEOUT) -> 
                 "is_repo": True,
                 "local": local,
                 "remote": "",
+                "local_version": local_version(),
+                "remote_version": None,
                 "message": "Kontrola sa nepodarila (offline alebo chyba git fetch).",
             }
+        # Remote version for display only; SHAs stay internal.
+        # A parse failure is not an error: the GUI falls back to
+        # "novšia verzia" with no SHA and no version number.
+        remote_version = None
+        try:
+            shown = _git(
+                repo, ["show", "origin/main:beaver/__init__.py"], timeout
+            )
+            if shown.returncode == 0:
+                remote_version = parse_version(shown.stdout)
+        except Exception:
+            remote_version = None
         if local == remote:
             return {
                 "status": "up_to_date",
                 "is_repo": True,
                 "local": local,
                 "remote": remote,
+                "local_version": local_version(),
+                "remote_version": remote_version,
                 "message": "Máš najnovšiu verziu.",
             }
         return {
@@ -95,6 +143,8 @@ def check_update(repo_dir: Path | None = None, timeout: int = FETCH_TIMEOUT) -> 
             "is_repo": True,
             "local": local,
             "remote": remote,
+            "local_version": local_version(),
+            "remote_version": remote_version,
             "message": "K dispozícii je aktualizácia.",
         }
     except Exception as exc:  # timeout, missing git, anything else
@@ -103,6 +153,8 @@ def check_update(repo_dir: Path | None = None, timeout: int = FETCH_TIMEOUT) -> 
             "is_repo": (repo / ".git").exists(),
             "local": "",
             "remote": "",
+            "local_version": local_version(),
+            "remote_version": None,
             "message": f"Kontrola sa nepodarila: {exc.__class__.__name__} (offline?).",
         }
 
