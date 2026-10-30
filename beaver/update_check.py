@@ -1,4 +1,4 @@
-"""Update checking for CONVERTOR-APP (v0.5.1).
+"""Update checking for CONVERTOR-APP (v0.5.2).
 
 Stdlib + git subprocess only, no new dependency, no network
 library of its own. Everything is best-effort: a missing git
@@ -10,9 +10,12 @@ How it works: the app is run from a git clone, so "is there an
 update?" means "does origin/main point somewhere other than
 my local HEAD?". A short-timeout ``git fetch origin`` refreshes
 the remote refs, then local HEAD and origin/main are compared.
-Updating is a plain ``git pull origin main``; the app does NOT
-restart itself — after a successful pull it tells the user to
-restart, because on Windows the running .py files may be locked.
+Updating is a plain ``git pull origin main``. After a
+successful pull the GUI (v0.5.2) restarts the app itself via
+``spawn_restart()``: it spawns a new process running the same
+``main.py`` and then quits the old one. ``run_update()`` itself
+only pulls — it never quits anything, so a failed pull can
+never leave the user without a running app.
 
 Display rule (v0.5.1): commit SHAs are used ONLY internally
 for the up-to-date/available comparison. Every user-visible
@@ -24,8 +27,10 @@ remote version cannot be parsed, the wording falls back to
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 _VERSION_RE = re.compile(r"\bv(\d+(?:\.\d+){1,2})\b")
@@ -49,6 +54,62 @@ def local_version() -> str | None:
         )
     except OSError:
         return None
+
+def app_root() -> Path:
+    """App root: the directory containing ``main.py``.
+
+    Derived from the beaver package location, not from the
+    current working directory alone, so restarting works even
+    when the app was launched from another folder.
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def main_py_path(root: Path | None = None) -> Path | None:
+    """Path to ``main.py`` under ``root`` (or the app root), or None."""
+    candidate = (Path(root) if root is not None else app_root()) / "main.py"
+    return candidate if candidate.is_file() else None
+
+
+def spawn_restart(
+    executable: str | None = None,
+    script: str | os.PathLike | None = None,
+    cwd: str | os.PathLike | None = None,
+) -> bool:
+    """Spawn a new process running the app, without quitting this one.
+
+    Returns True only if a new process was actually spawned.
+    Returns False — and spawns nothing — when the main.py path
+    cannot be resolved or the spawn itself fails. The caller
+    (the GUI) is responsible for quitting the old process, and
+    must only call this after a successful pull; a failed pull
+    must never reach here. The new process's output goes to
+    DEVNULL so it survives the old process quitting, and on
+    POSIX it gets its own session so it is not killed with
+    the old process group.
+    """
+    script_path = (
+        Path(script) if script is not None else main_py_path()
+    )
+    if script_path is None or not script_path.is_file():
+        return False
+    root = Path(cwd) if cwd is not None else script_path.parent
+    try:
+        kwargs: dict = {
+            "cwd": str(root),
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+        }
+        if os.name != "nt":
+            kwargs["start_new_session"] = True
+        subprocess.Popen(
+            [executable or sys.executable, str(script_path)], **kwargs
+        )
+        return True
+    except Exception:
+        return False
+
 
 FETCH_TIMEOUT = 10
 PULL_TIMEOUT = 60
@@ -170,7 +231,7 @@ def run_update(repo_dir: Path | None = None, timeout: int = PULL_TIMEOUT) -> dic
         if result.returncode == 0:
             return {
                 "success": True,
-                "message": "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+                "message": "Aktualizácia stiahnutá.",
                 "output": output,
             }
         return {"success": False, "message": "Aktualizácia zlyhala.", "output": output}

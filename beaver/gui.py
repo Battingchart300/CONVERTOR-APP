@@ -1,4 +1,4 @@
-"""Main local GUI window for CONVERTOR-APP (v0.5.1).
+"""Main local GUI window for CONVERTOR-APP (v0.5.2).
 
 Written from scratch for this app, in PySide6. It is in the same
 spirit as a local launcher window — sections, buttons, and a
@@ -45,6 +45,10 @@ settings, a session history list, an "Otvoriť priečinok"
 button, and update checking — automatic (silent) at startup
 plus manual in Settings → Aktualizácie.
 
+v0.5.2: after a successful update the app restarts itself
+(spawn the new process, then quit the old one after ~500 ms);
+a failed pull never restarts or quits anything.
+
 Everything runs locally. No upload, no account, no keys, no network.
 """
 
@@ -89,7 +93,7 @@ from .actions import (
     text_to_pdf_path,
 )
 from .settings import default_settings, load_settings, save_settings
-from .update_check import check_update, local_version, run_update
+from .update_check import check_update, local_version, run_update, spawn_restart
 from .widget import FloatingWidget, TextDialog
 
 
@@ -391,22 +395,39 @@ class SettingsDialog(QDialog):
         self._update_button.setEnabled(result["status"] == "available")
 
     def _run_update(self) -> None:
-        """Pull from origin/main, then tell the user to restart."""
+        """Pull from origin/main, then auto-restart on success (v0.5.2).
+
+        Success: show "Aktualizácia stiahnutá, reštartujem…",
+        spawn the new process and quit the old one via the main
+        window's schedule_restart_after_update() — the ~500 ms
+        delay keeps the status visible. Failure: no restart, no
+        quit, the app keeps running on the old version. If the
+        main.py path cannot be resolved, fall back to the old
+        manual-restart message instead of quitting.
+        """
         result = run_update()
-        if result.get("success"):
-            self._update_status.setText(
-                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala."
-            )
-            self._update_button.setEnabled(False)
-            QMessageBox.information(
-                self, "Aktualizované",
-                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
-            )
-        else:
+        if not result.get("success"):
             QMessageBox.warning(
                 self, "Aktualizácia zlyhala",
                 result.get("message", "Aktualizácia zlyhala."),
             )
+            return
+        self._update_status.setText("Aktualizácia stiahnutá, reštartujem…")
+        self._update_button.setEnabled(False)
+        parent = self.parent()
+        if parent is not None and hasattr(
+            parent, "schedule_restart_after_update"
+        ):
+            if parent.schedule_restart_after_update():
+                return
+        # Fallback: main.py could not be resolved, so do NOT quit.
+        self._update_status.setText(
+            "Aktualizované. Reštartuj appku, aby sa nová verzia načítala."
+        )
+        QMessageBox.information(
+            self, "Aktualizované",
+            "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+        )
 
     def _on_folder_toggled(self) -> None:
         enabled = self._folder_radio.isChecked()
@@ -548,7 +569,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.5.1")
+        self.setWindowTitle("CONVERTOR-APP v0.5.2")
         self.setMinimumSize(640, 700)
         self.setAcceptDrops(True)
         self._file: Path | None = None
@@ -680,7 +701,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(history_box)
 
         self.setCentralWidget(root)
-        self.log("CONVERTOR-APP v0.5.1 ready. Pick a file, or paste text.")
+        self.log("CONVERTOR-APP v0.5.2 ready. Pick a file, or paste text.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
         # Automatic update check (v0.5): after the window shows,
@@ -733,21 +754,44 @@ class MainWindow(QMainWindow):
                 )
             self._update_notice.setVisible(True)
 
-    def _run_update_from_notice(self) -> None:
-        """Update from the top-row notice, then ask for a restart."""
-        result = run_update()
-        if result.get("success"):
-            self.log("Aktualizované — reštartuj appku.")
-            self._update_notice.setVisible(False)
-            QMessageBox.information(
-                self, "Aktualizované",
-                "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+    def schedule_restart_after_update(self) -> bool:
+        """Spawn the new app process and quit this one after ~500 ms.
+
+        Returns True only if a new process was actually spawned.
+        Returns False — and quits nothing — when main.py cannot
+        be resolved or the spawn fails. The caller must only call
+        this after a successful pull. The delay keeps the
+        "reštartujem…" status visible before the old window closes.
+        """
+        if not spawn_restart():
+            self.log(
+                "Reštart sa nepodaril — reštartuj appku ručne, "
+                "aby sa nová verzia načítala."
             )
-        else:
+            return False
+        self.log("Aktualizácia stiahnutá, reštartujem…")
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(500, app.quit)
+        return True
+
+    def _run_update_from_notice(self) -> None:
+        """Update from the top-row notice, then auto-restart (v0.5.2)."""
+        result = run_update()
+        if not result.get("success"):
             QMessageBox.warning(
                 self, "Aktualizácia zlyhala",
                 result.get("message", "Aktualizácia zlyhala."),
             )
+            return
+        self._update_notice.setVisible(False)
+        if self.schedule_restart_after_update():
+            return
+        # Fallback: spawn failed, so do NOT quit.
+        QMessageBox.information(
+            self, "Aktualizované",
+            "Aktualizované. Reštartuj appku, aby sa nová verzia načítala.",
+        )
 
     # -- file picking / dropping -----------------------------------------
     # NOTE (v0.4): dropping onto the MAIN window still does NOT

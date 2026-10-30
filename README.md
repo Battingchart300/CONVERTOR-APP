@@ -1,4 +1,4 @@
-# CONVERTOR-APP — v0.5.1
+# CONVERTOR-APP — v0.5.2
 
 A local desktop file converter, vibecoded from scratch as an
 original implementation. It is **inspired by** the idea of a desktop
@@ -22,6 +22,23 @@ was copied from any existing app of that kind.
    draggable widget. Drag a file onto it and a ring of actions
    opens around it. Toggle it from the main window
    ("Floating widget: show / hide").
+
+### v0.5.2 patch — the app restarts itself after updating
+
+Updating used to run `git pull origin main` and then only
+tell the user to restart manually. Now, after a successful
+pull, the app shows "Aktualizácia stiahnutá, reštartujem…",
+spawns a new process running the same `main.py` (path
+resolved from the app folder, not from the working
+directory), and quits the old process after ~500 ms, so the
+status stays visible. A failed pull never restarts or quits
+anything — the app keeps running on the old version and
+shows the error. If `main.py` cannot be resolved, it falls
+back to the old manual-restart message instead of quitting.
+This applies to both update paths: Settings →
+Aktualizácie → Aktualizovať, and the top-row
+"Aktualizácia k dispozícii" button. A mere update check
+never restarts anything, only an actual successful update.
 
 ### v0.5.1 patch — update display shows versions, not commit hashes
 
@@ -109,10 +126,10 @@ would be confusing.
   version, remote version, up-to-date / available / offline —
   version numbers only, never commit hashes, since v0.5.1)
   and an "Aktualizovať" button, enabled only when an update
-  is available. Updating runs `git pull origin main` and
-  then tells the user to restart the app — the app does
-  **not** force-restart itself, because on Windows the
-  running files may be locked.
+  is available. Updating runs `git pull origin main` and,
+  since v0.5.2, the app then restarts itself automatically
+  (see the v0.5.2 patch note above); a failed pull never
+  restarts or quits anything.
 - **Never crashes the app:** no git repo, no internet, a
   timeout (~10 s for fetch) or any git error returns an
   offline/error status, never an exception. The check uses
@@ -320,7 +337,7 @@ widget's **Text** button and save to the Desktop.
   on a headless Linux VM; a PySide6 live run was not possible
   there, and the GUI was only compile-checked). The user must
   run `python main.py` on his Windows PC and check: main
-  window opens (title v0.5.1), file pick + drop work, Output
+  window opens (title v0.5.2), file pick + drop work, Output
   folder + "ask for output file" work on an image and a
   document, Drop window opens / asks / runs / logs, each ODF
   conversion saves a new file, text saves default to Desktop,
@@ -350,7 +367,10 @@ widget's **Text** button and save to the Desktop.
   up-to-date/offline. v0.5 action tests: 31/31 passed on
   Linux (synthetic XLSX/PPTX/TXT/CSV/HTML, image, MD and
   ODT regression, routing, settings, update-check
-  non-repo case).
+  non-repo case). **New in v0.5.2 to check:** updating via
+  either update button auto-restarts the app into the new
+  version with no manual restart; a failed update does not
+  restart or quit anything.
 
 ## Layout
 
@@ -380,5 +400,7 @@ beaver/
                         + safe fallback on a missing/corrupt file,
                         now also JPG / compress quality
   update_check.py       update check (stdlib + git subprocess):
-                        fetch + HEAD vs origin/main, never raises
+                        fetch + HEAD vs origin/main, never raises;
+                        plus spawn_restart() / main_py_path() for
+                        the v0.5.2 auto-restart after a pull
 ```
