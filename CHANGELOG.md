@@ -2,6 +2,27 @@
 
 Full version history, moved here from README.md on 2026-11-08 so the README stays short and portfolio-ready. Nothing below was rewritten — it is the v0.5.2 README as it stood.
 
+## v0.6 — GUI redesign (clean modern dark)
+
+The main window was redesigned for a better first impression:
+one restrained teal accent, a large drop zone at the top
+("Pretiahni sem súbor", click = pick a file), format chips,
+and conversion cards — still only the actions that fit the
+picked file. All GUI strings are now Slovak (file formats
+stay as names: PDF, DOCX, ...); the duplicated "No file
+picked yet." / "Žiadny súbor vybratý." label pair is gone.
+Log and history moved out of the main flow into a second
+tab, "Log a história", so an empty log no longer takes half
+the screen. Header now has the subtitle "Lokálny konvertor
+— bez cloudu, bez účtu" and a v0.6 version badge. No
+behaviour changed: smart Conversions, Output, Settings,
+Drop window, Batch, Text, Floating widget, update check
+and auto-restart after update all work as in v0.5.2.
+Also new in v0.6: `run.ps1` — a PowerShell launcher that checks
+Python and the required libraries (by real import), offers to
+install any missing ones (Y/N prompt), and then starts the app;
+N cancels without installing anything.
+
 # CONVERTOR-APP — v0.5.2
 
 A local desktop file converter, vibecoded from scratch as an

@@ -84,14 +84,14 @@ class RingMenu(QWidget):
         try:
             output = func()
         except Exception as exc:  # show it, do not crash the widget
-            QMessageBox.warning(self, "Failed", f"{exc}")
+            QMessageBox.warning(self, "Zlyhalo", f"{exc}")
         else:
             if output is None:
                 pass  # user cancelled a save dialog — nothing to report
             elif isinstance(output, Path):
-                QMessageBox.information(self, "Done", f"Saved:\n{output.name}")
+                QMessageBox.information(self, "Hotovo", f"Uložené:\n{output.name}")
             else:
-                QMessageBox.information(self, "Done", str(output))
+                QMessageBox.information(self, "Hotovo", str(output))
         self.close()
 
 
@@ -100,12 +100,12 @@ class TextDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Paste text")
+        self.setWindowTitle("Vložiť text")
         self.setMinimumSize(420, 320)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Paste or type text, then OK:"))
+        layout.addWidget(QLabel("Vlož alebo napíš text a potvrď:"))
         self.editor = QPlainTextEdit(self)
-        self.editor.setPlaceholderText("Paste text here…")
+        self.editor.setPlaceholderText("Vlož text sem…")
         layout.addWidget(self.editor)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -173,14 +173,14 @@ class FloatingWidget(QWidget):
             return
         text = dialog.text()
         if not text.strip():
-            QMessageBox.warning(self, "Empty", "No text pasted — nothing to do.")
+            QMessageBox.warning(self, "Prázdne", "Žiadny text — nič sa neurobí.")
             return
         items = [
-            ("Save .md", lambda: self._save_text(text, "md")),
-            ("Save .txt", lambda: self._save_text(text, "txt")),
-            ("To PDF", lambda: self._save_pasted_pdf(text)),
-            ("To HTML", lambda: self._save_text(text, "html")),
-            ("Copy", lambda: self._copy_text(text)),
+            ("Uložiť .md", lambda: self._save_text(text, "md")),
+            ("Uložiť .txt", lambda: self._save_text(text, "txt")),
+            ("Do PDF", lambda: self._save_pasted_pdf(text)),
+            ("Do HTML", lambda: self._save_text(text, "html")),
+            ("Kopírovať", lambda: self._copy_text(text)),
         ]
         center = self.geometry().center()
         self._ring = RingMenu(items, center)
@@ -201,7 +201,7 @@ class FloatingWidget(QWidget):
             "txt": "Text (*.txt)",
             "html": "HTML (*.html)",
         }[kind]
-        chosen, _ = QFileDialog.getSaveFileName(self, "Save text", default, filters)
+        chosen, _ = QFileDialog.getSaveFileName(self, "Uložiť text", default, filters)
         if not chosen:
             return None
         return save_text_to_path(text, chosen, kind)
@@ -210,7 +210,7 @@ class FloatingWidget(QWidget):
         """Save pasted text as PDF, dialog defaults to the text folder."""
         default = str(self._text_dir / default_text_filename("pdf"))
         chosen, _ = QFileDialog.getSaveFileName(
-            self, "Save text as PDF", default, "PDF (*.pdf)"
+            self, "Uložiť text ako PDF", default, "PDF (*.pdf)"
         )
         if not chosen:
             return None
@@ -218,7 +218,7 @@ class FloatingWidget(QWidget):
 
     def _copy_text(self, text: str) -> str:
         QApplication.clipboard().setText(text)
-        return "Copied to clipboard."
+        return "Skopírované do schránky."
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -242,7 +242,7 @@ class FloatingWidget(QWidget):
             return
         file_path = Path(urls[0].toLocalFile())
         if not file_path.is_file():
-            QMessageBox.warning(self, "Failed", "Drop a single file, not a folder.")
+            QMessageBox.warning(self, "Zlyhalo", "Pretiahni jeden súbor, nie priečinok.")
             return
         # Route by extension (v0.3 adds .odt/.ods/.odp): .md -> MD
         # ring, .pdf -> PDF ring, .docx -> Word ring, .odt/.ods/.odp

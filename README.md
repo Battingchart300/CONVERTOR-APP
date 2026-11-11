@@ -1,4 +1,4 @@
-# CONVERTOR-APP — v0.5.2
+# CONVERTOR-APP — v0.6
 
 Local desktop file converter for Windows. Pick a file, get only the conversions that fit it, and save a new file — the original is never overwritten.
 
@@ -21,16 +21,16 @@ Plus: batch conversion (many files, grouped by type), session history, configura
 
 ## Three ways to use it
 
-1. **Main window** — `python main.py`. Full control panel: file, output, smart conversions, text, timestamped log.
+1. **Main window** — `.\run.ps1` (checks the libraries and starts the app) or directly `python main.py`. Clean dark GUI: big drop zone, smart conversion cards, output, text, and a Log & history tab.
 2. **Drop window** — drop a file, the app asks what to do with it and shows only fitting actions.
 3. **Floating widget** — small always-on-top widget. Drag a file onto it and a ring of actions opens around it.
 
 ## Quick start (Windows)
 
 ```powershell
-pip install -r requirements.txt
-python main.py
+.\run.ps1
 ```
+`run.ps1` skontroluje Python a potrebné knižnice, chýbajúce ponúkne nainštalovať (Y/N) a potom spustí appku. Priamo bez kontroly: `python main.py`.
 
 Pick a file (or drag it in), click a conversion, check the Log for where the new file was saved.
 
@@ -58,7 +58,7 @@ beaver/
 - Document → PDF keeps text, headings and simple lists. Images, complex tables and exact layout are **not** preserved — this is a text converter, not a layout clone.
 - Formulas are read as their stored (cached) value, not recalculated. XLSX / ODS → CSV is the first sheet only.
 - Scanned / image-only PDFs have no extractable text, so PDF → Markdown on those yields (nearly) empty output.
-- The Windows GUI run of v0.5.2 has not been tested yet — code compiles and the actions were tested on Linux (31/31 checks in v0.5). See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
+- The Windows GUI run of v0.6 has not been tested yet — code compiles and the actions were tested on Linux (31/31 checks in v0.5). See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
 
 ## License
 
