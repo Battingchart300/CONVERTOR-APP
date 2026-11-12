@@ -2,6 +2,37 @@
 
 Full version history, moved here from README.md on 2026-11-08 so the README stays short and portfolio-ready. Nothing below was rewritten — it is the v0.5.2 README as it stood.
 
+## v0.6.1 — jednoduchšie GUI pre bežných ľudí + Windows .exe
+
+Hlavná obrazovka je už len jeden jasný postup v troch krokoch:
+1. vyber súbor (pretiahni alebo klikni), 2. vyber, čo z neho
+spraviť (jedna možnosť, nie tlačidlo na každú akciu),
+3. jedno veľké tlačidlo Konvertovať — a výsledok sa ukáže
+rovno pod ním ("Hotovo! Nový súbor: …") aj s tlačidlom
+"Otvoriť priečinok s výsledkom". Výstup (kam sa nový súbor
+uloží) je už len jeden riadok; nastavenie samotné žije
+v Nastaveniach. Text, okno na pretiahnutie, hromadná
+konverzia a widget sa presunuli na kartu "Ďalšie"; log
+a história ostávajú na "Log a história". Chybové hlášky sú
+ľudskou rečou ("Súbor sa nepodarilo prečítať…"), technický
+detail ostáva len v logu. Tmavý dizajn a tyrkysová farba
+z v0.6 ostali. Opravené aj: ikona a tlačidlo Text plávajúceho
+widgetu sa vytvárali až pri uložení nastavení, takže widget
+sa po zapnutí ukázal prázdny — teraz sa vytvoria hneď pri
+spustení.
+
+Windows .exe (nové): GitHub Actions workflow
+(.github/workflows/build-exe.yml) postaví na windows-latest
+jeden CONVERTOR-APP.exe cez PyInstaller (onefile, bez
+konzoly; build je v CONVERTOR-APP.spec, takže lokálny build
+na Windows dá ten istý výsledok) a pri tage v0.6.1 ho pripojí
+ako asset do GitHub Release. Bežný človek si stiahne .exe
+z Releases a dvakrát klikne — bez Pythonu, bez PowerShellu,
+bez .zip. README má .exe ako prvú možnosť inštalácie;
+run.ps1 ostáva ako možnosť pre vývojárov. Poznámka: .exe
+nie je digitálne podpísaný, takže Windows pri prvom
+spustení ukáže varovanie SmartScreen.
+
 ## v0.6 — GUI redesign (clean modern dark)
 
 The main window was redesigned for a better first impression:
