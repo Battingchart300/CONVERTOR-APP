@@ -1,22 +1,27 @@
-"""Main local GUI window for CONVERTOR-APP (v0.6).
+"""Main local GUI window for CONVERTOR-APP (v0.6.1).
 
-Clean modern dark redesign (v0.6): one restrained teal accent, a
-large drop zone at the top, conversion cards, and two tabs —
-"Konvertor" (the working screen) and "Log a história". All GUI
-strings are Slovak (file formats stay as names: PDF, DOCX, ...).
+One clear flow for ordinary users (v0.6.1): the "Konvertor" tab is
+just three steps — 1. pick a file, 2. pick what to make of it,
+3. one big "Konvertovať" button — plus a plain result line.
+Advanced stuff (text paste, drop window, batch, widget toggle)
+lives on the "Ďalšie" tab; log and history on "Log a história".
+All GUI strings are Slovak, no jargon; errors are explained in
+plain words. Dark design with one teal accent, as in v0.6.
 
 Layout:
   Header — app name + subtitle "Lokálny konvertor — bez cloudu,
   bez účtu", version badge, update notice, gear "⚙ Nastavenia".
-  Tab "Konvertor": big drop zone, format chips (labels only),
-  file info (name / recognised type / size), compact Output row,
-  smart Conversion cards, Text row.
+  Tab "Konvertor": step 1 (big drop zone + file info), step 2
+  (radio choice of only the conversions that fit the file),
+  step 3 (one big Konvertovať button + result line), and one
+  line saying where the new file will be saved.
+  Tab "Ďalšie": text paste, drop window, batch, widget toggle.
   Tab "Log a história": timestamped log + session history list
-  + "Otvoriť priečinok" — no longer taking half the main screen.
+  + "Otvoriť priečinok".
 
-Behaviour is unchanged from v0.5.2: smart Conversions (only the
-actions that fit the picked file), Output settings + settings
-sync, gear Settings dialog, Drop window (auto-ask dialog),
+Behaviour is unchanged from v0.6 apart from the layout: smart
+Conversions (only the actions that fit the picked file), Output
+settings in the Settings dialog, Drop window (auto-ask dialog),
 Batch conversion, Text paste, Floating widget toggle, automatic
 startup update check + manual check in Settings, auto-restart
 after a successful update.
@@ -117,6 +122,29 @@ def _format_size(size: int) -> str:
     return f"{size / (1024 * 1024):.1f} MB"
 
 
+def _friendly_error(exc: Exception) -> str:
+    """Plain-Slovak explanation of a failed conversion (no jargon).
+
+    The technical detail (exception text) stays in the log only —
+    the user sees this. Actions raise ValueError("Not a readable
+    ...") for unreadable or corrupt files.
+    """
+    text = str(exc)
+    if isinstance(exc, ValueError) and "readable" in text:
+        return (
+            "Súbor sa nepodarilo prečítať. Skús iný súbor, "
+            "alebo skontroluj, či nie je poškodený."
+        )
+    if isinstance(exc, FileNotFoundError):
+        return "Súbor sa nenašiel. Možno bol medzitým presunutý alebo zmazaný."
+    if isinstance(exc, PermissionError):
+        return (
+            "Nemám povolenie zapisovať do tohto priečinka. "
+            "Skús iný priečinok pre výstup."
+        )
+    return "Niečo sa nepodarilo. Skús to znova, alebo vyber iný súbor."
+
+
 ACCENT = "#2AB8A6"
 
 # One restrained dark theme (v0.6): dark background, one teal accent
@@ -136,7 +164,10 @@ QPushButton { background-color: #1e2530; color: #e8ecf1; border: 1px solid #2a33
 QPushButton:hover { background-color: #273041; }
 QPushButton#primaryButton { background-color: #2ab8a6; color: #0c1216; border: none; font-weight: bold; }
 QPushButton#primaryButton:hover { background-color: #34c9b6; }
-QPushButton#convButton { background-color: #1e2530; border: 1px solid #2a3342; text-align: left; font-weight: bold; }
+QPushButton#convertButton { background-color: #2ab8a6; color: #0c1216; border: none; font-weight: bold; font-size: 16px; border-radius: 10px; }
+QPushButton#convertButton:hover { background-color: #34c9b6; }
+QPushButton#convertButton:disabled { background-color: #22303a; color: #5f7080; }
+QRadioButton { spacing: 8px; padding: 4px 0; }
 QPushButton#gearButton { background-color: #1b2230; }
 QGroupBox { border: 1px solid #2a3342; border-radius: 10px; margin-top: 10px; padding-top: 10px; font-weight: bold; }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
@@ -144,7 +175,6 @@ QTabWidget::pane { border: 1px solid #2a3342; border-radius: 8px; }
 QTabBar::tab { background-color: #1b2230; color: #9aa7b4; border: 1px solid #2a3342; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 6px 14px; }
 QTabBar::tab:selected { background-color: #232c3d; color: #e8ecf1; }
 QLineEdit, QPlainTextEdit, QListWidget, QComboBox, QSpinBox { background-color: #171d28; color: #e8ecf1; border: 1px solid #2a3342; border-radius: 6px; padding: 4px; }
-QWidget#card { background-color: #1b2230; border: 1px solid #2a3342; border-radius: 8px; }
 """
 
 
@@ -620,7 +650,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.6")
+        self.setWindowTitle("CONVERTOR-APP v0.6.1")
         self.setMinimumSize(720, 700)
         self.setAcceptDrops(True)
         self._file: Path | None = None
@@ -645,7 +675,7 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("subtitle")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
-        version_badge = QLabel("v0.6")
+        version_badge = QLabel("v0.6.1")
         version_badge.setObjectName("versionBadge")
         self._update_notice = QPushButton("Aktualizácia k dispozícii")
         self._update_notice.setVisible(False)
@@ -670,9 +700,23 @@ class MainWindow(QMainWindow):
         tab_layout.setContentsMargins(4, 8, 4, 4)
         tab_layout.setSpacing(10)
 
-        # Veľká zóna na pretiahnutie súboru (klik = vybrať súbor)
+        # --- Krok 1: Vyber súbor ---------------------------------------
+        # Jedna veľká zóna na pretiahnutie (klik = vybrať súbor) +
+        # info o vybratom súbore. Nič iné tu nie je — bežný človek
+        # má vidieť len to, čo práve potrebuje.
+        step1_box = QGroupBox("1. Vyber súbor")
+        step1_layout = QVBoxLayout(step1_box)
         self._drop_zone = _DropZone(self)
-        tab_layout.addWidget(self._drop_zone)
+        step1_layout.addWidget(self._drop_zone)
+        self._file_info_label = QLabel("Zatiaľ žiadny súbor.")
+        self._file_info_label.setObjectName("fileInfo")
+        self._file_info_label.setWordWrap(True)
+        step1_layout.addWidget(self._file_info_label)
+        pick = QPushButton("Vybrať súbor…")
+        pick.setObjectName("primaryButton")
+        pick.clicked.connect(self._pick_file)
+        step1_layout.addWidget(pick)
+        tab_layout.addWidget(step1_box)
         # Odznaky podporovaných formátov — len popisy, nie tlačidlá
         chips_row = QHBoxLayout()
         chips_row.setSpacing(4)
@@ -683,88 +727,94 @@ class MainWindow(QMainWindow):
             chips_row.addWidget(chip)
         chips_row.addStretch(1)
         tab_layout.addLayout(chips_row)
-        # Info o vybratom súbore — jediný popis, žiadna duplicita
-        self._file_info_label = QLabel("Žiadny súbor vybratý.")
-        self._file_info_label.setObjectName("fileInfo")
-        self._file_info_label.setWordWrap(True)
-        tab_layout.addWidget(self._file_info_label)
-        # Vedľajšie akcie — zámerne nie dominantné
-        tools_row = QHBoxLayout()
-        pick = QPushButton("Vybrať súbor…")
-        pick.setObjectName("primaryButton")
-        pick.clicked.connect(self._pick_file)
+
+        # (Výstup tu už nie je: v0.6.1 je na hlavnej obrazovke len
+        # jeden riadok o tom, kam sa nový súbor uloží — nastavenie
+        # samotné žije v Nastaveniach. Pozri krok 3 nižšie.)
+
+        # --- Krok 2: Vyber, čo z neho spraviť --------------------------
+        # Bez statického zoznamu všetkých tlačidiel: sekciu prestavuje
+        # _rebuild_conversions() pri zmene vybratého súboru — len
+        # nápoveda bez súboru, len vhodné možnosti pre rozpoznaný
+        # súbor (prepínač, nie tlačidlo na každú akciu), hláška
+        # "zatiaľ nepodporujem" pre neznámy typ. Smerovanie je
+        # actions_for_file(), to isté ako v Okne na pretiahnutie.
+        step2_box = QGroupBox("2. Vyber, čo z neho spraviť")
+        self._conv_layout = QVBoxLayout(step2_box)
+        self._recognition_label = QLabel("Najprv vyber súbor v kroku 1.")
+        self._recognition_label.setWordWrap(True)
+        self._conv_layout.addWidget(self._recognition_label)
+        self._conv_radios: list[QRadioButton] = []
+        self._conv_actions: list = []
+        tab_layout.addWidget(step2_box)
+
+        # --- Krok 3: jedno veľké tlačidlo ------------------------------
+        self._convert_button = QPushButton("Konvertovať")
+        self._convert_button.setObjectName("convertButton")
+        self._convert_button.setMinimumHeight(52)
+        self._convert_button.setEnabled(False)
+        self._convert_button.clicked.connect(self._on_convert_clicked)
+        tab_layout.addWidget(self._convert_button)
+        # Výsledok — jeden jasný riadok, nie vyskakovacie okno
+        self._result_label = QLabel("")
+        self._result_label.setWordWrap(True)
+        self._result_label.setVisible(False)
+        tab_layout.addWidget(self._result_label)
+        result_row = QHBoxLayout()
+        self._open_folder_button = QPushButton("Otvoriť priečinok s výsledkom")
+        self._open_folder_button.clicked.connect(self._open_output_folder)
+        self._open_folder_button.setVisible(False)
+        self._next_file_button = QPushButton("Konvertovať ďalší súbor")
+        self._next_file_button.clicked.connect(self._reset_flow)
+        self._next_file_button.setVisible(False)
+        result_row.addWidget(self._open_folder_button)
+        result_row.addWidget(self._next_file_button)
+        result_row.addStretch(1)
+        tab_layout.addLayout(result_row)
+        # Kam sa nový súbor uloží — jeden riadok ľudskou rečou.
+        # Nastavenie samotné žije v Nastaveniach (ozubené koleso).
+        save_row = QHBoxLayout()
+        self._save_info_label = QLabel("")
+        self._save_info_label.setObjectName("fileInfo")
+        self._save_info_label.setWordWrap(True)
+        save_row.addWidget(self._save_info_label, stretch=1)
+        change_save = QPushButton("Zmeniť…")
+        change_save.clicked.connect(self._open_settings)
+        save_row.addWidget(change_save)
+        tab_layout.addLayout(save_row)
+        tab_layout.addStretch(1)
+        tabs.addTab(convertor_tab, "Konvertor")
+
+        # --- Karta 2: Ďalšie -------------------------------------------
+        # Pokročilé veci mimo hlavnej obrazovky: text bez súboru,
+        # okno na pretiahnutie, hromadná konverzia, widget.
+        more_tab = QWidget()
+        more_layout = QVBoxLayout(more_tab)
+        more_layout.setContentsMargins(4, 8, 4, 4)
+        more_layout.setSpacing(10)
+        text_box = QGroupBox("Text bez súboru")
+        text_layout = QHBoxLayout(text_box)
+        text_layout.addWidget(QLabel("Napíš alebo vlož text a ulož ho ako súbor."))
+        paste = QPushButton("Vložiť text…")
+        paste.clicked.connect(self._paste_text)
+        text_layout.addWidget(paste)
+        more_layout.addWidget(text_box)
+        tools_box = QGroupBox("Ďalšie nástroje")
+        tools_layout = QVBoxLayout(tools_box)
         drop_button = QPushButton("Okno na pretiahnutie…")
         drop_button.clicked.connect(self._open_drop_window)
         batch_button = QPushButton("Hromadná konverzia…")
         batch_button.clicked.connect(self._open_batch)
-        tools_row.addWidget(pick)
-        tools_row.addWidget(drop_button)
-        tools_row.addWidget(batch_button)
-        tools_row.addStretch(1)
-        tab_layout.addLayout(tools_row)
-
-        # --- Výstup: kompaktný riadok ----------------------------------
-        output_box = QGroupBox("Výstup")
-        output_layout = QVBoxLayout(output_box)
-        folder_row = QHBoxLayout()
-        self._next_radio = QRadioButton("Vedľa originálu (predvolené)")
-        self._next_radio.setChecked(True)
-        folder_row.addWidget(self._next_radio)
-        self._folder_radio = QRadioButton("Priečinok:")
-        self._folder_edit = QLineEdit()
-        self._folder_edit.setReadOnly(True)
-        self._folder_edit.setPlaceholderText("Zatiaľ nevybratý priečinok")
-        self._folder_edit.setEnabled(False)
-        folder_pick = QPushButton("Prehľadávať…")
-        folder_pick.setEnabled(False)
-        folder_pick.clicked.connect(self._pick_output_folder)
-        self._folder_radio.toggled.connect(self._on_output_mode_changed)
-        self._folder_edit_ref = self._folder_edit
-        self._folder_button_ref = folder_pick
-        folder_row.addWidget(self._folder_radio)
-        folder_row.addWidget(self._folder_edit, stretch=1)
-        folder_row.addWidget(folder_pick)
-        output_layout.addLayout(folder_row)
-        self._ask_checkbox = QCheckBox(
-            "Opýtať sa na výstupný súbor pred každou konverziou"
-        )
-        self._ask_checkbox.toggled.connect(self._save_output_settings)
-        output_layout.addWidget(self._ask_checkbox)
-        tab_layout.addWidget(output_box)
-        self._apply_settings_to_controls()
-
-        # --- Konverzie (SMART) -----------------------------------------
-        # Bez statického zoznamu všetkých tlačidiel: sekciu prestavuje
-        # _rebuild_conversions() pri zmene vybratého súboru — len
-        # nápoveda bez súboru, len vhodné akcie pre rozpoznaný
-        # súbor, hláška "zatiaľ nepodporujem" (bez tlačidiel) pre
-        # neznámy typ. Smerovanie je actions_for_file(), to isté
-        # ako v Okne na pretiahnutie.
-        conv_box = QGroupBox("Konverzie")
-        self._conv_layout = QVBoxLayout(conv_box)
-        self._recognition_label = QLabel(
-            "Vyber súbor a ukážem len konverzie preň."
-        )
-        self._recognition_label.setWordWrap(True)
-        self._conv_layout.addWidget(self._recognition_label)
-        self._conv_buttons: list[QPushButton] = []
-        tab_layout.addWidget(conv_box)
-
-        # --- Text ------------------------------------------------------
-        text_box = QGroupBox("Text")
-        text_layout = QHBoxLayout(text_box)
-        text_layout.addWidget(QLabel("Bez súboru — uloží sa predvolene na Plochu"))
-        paste = QPushButton("Vložiť text…")
-        paste.clicked.connect(self._paste_text)
         widget_button = QPushButton("Plávajúci widget: zobraziť / skryť")
         widget_button.clicked.connect(self._toggle_widget)
-        text_layout.addWidget(paste)
-        text_layout.addWidget(widget_button)
-        tab_layout.addWidget(text_box)
-        tab_layout.addStretch(1)
-        tabs.addTab(convertor_tab, "Konvertor")
+        tools_layout.addWidget(drop_button)
+        tools_layout.addWidget(batch_button)
+        tools_layout.addWidget(widget_button)
+        more_layout.addWidget(tools_box)
+        more_layout.addStretch(1)
+        tabs.addTab(more_tab, "Ďalšie")
 
-        # --- Karta 2: Log a história -----------------------------------
+        # --- Karta 3: Log a história -----------------------------------
         # Log a história už nezaberajú polovicu hlavnej obrazovky —
         # sú na druhej karte, kde si ich pozrie ten, kto ich chce.
         log_tab = QWidget()
@@ -787,7 +837,8 @@ class MainWindow(QMainWindow):
         tabs.addTab(log_tab, "Log a história")
 
         self.setCentralWidget(root)
-        self.log("CONVERTOR-APP v0.6 pripravená. Vyber súbor, alebo vlož text.")
+        self._apply_settings_to_controls()
+        self.log("CONVERTOR-APP v0.6.1 pripravená. Pretiahni súbor a klikni na Konvertovať.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
         # Automatic update check (v0.5): after the window shows,
@@ -901,33 +952,35 @@ class MainWindow(QMainWindow):
             f"{path.name} — {label or 'neznámy typ'} — {_format_size(size)}"
         )
         self.log(f"Vybrané: {path.name}")
+        self._hide_result()
         self._rebuild_conversions()
 
     def _rebuild_conversions(self) -> None:
-        """Rebuild section 3 for the currently picked file (v0.4/0.5).
+        """Rebuild step 2 for the currently picked file (v0.4/0.6.1).
 
-        No file: hint only, no buttons. Recognised file: a
+        No file: hint only, no options. Recognised file: a
         recognition label plus ONLY the actions that
-        actions_for_file() returns for it, each as a card: a
-        button plus a one-line description. Unknown type: a clear
-        "not supported yet" message, no buttons, and a log line —
-        never an empty list and never the full list.
+        actions_for_file() returns for it, each as one radio
+        option in plain words (the first one is pre-selected, so
+        the user can just press Konvertovať). Unknown type: a
+        clear "not supported yet" message, no options, and a log
+        line — never an empty list and never the full list.
         """
-        for widget in self._conv_buttons:
-            self._conv_layout.removeWidget(widget)
-            widget.deleteLater()
-        self._conv_buttons = []
+        for radio in self._conv_radios:
+            self._conv_layout.removeWidget(radio)
+            radio.deleteLater()
+        self._conv_radios = []
+        self._conv_actions = []
+        self._convert_button.setEnabled(False)
         if self._file is None:
-            self._recognition_label.setText(
-                "Vyber súbor a ukážem len konverzie preň."
-            )
+            self._recognition_label.setText("Najprv vyber súbor v kroku 1.")
             return
         actions = actions_for_file(self._file)
         if not actions:
             suffix = self._file.suffix.lower() or "(bez prípony)"
             self._recognition_label.setText(
                 f"Tento typ súboru zatiaľ nepodporujem ({suffix}) — "
-                "žiadne konverzie preň nemám."
+                "skús iný súbor."
             )
             self.log(
                 f"Pre {self._file.name} nie sú žiadne konverzie "
@@ -936,28 +989,18 @@ class MainWindow(QMainWindow):
             return
         label = _file_type_label(self._file)
         self._recognition_label.setText(
-            f"Rozpoznal som: {label} — môžeš z neho spraviť:"
+            f"Rozpoznal som: {label} — vyber, čo z neho spraviť:"
             if label
-            else f"Rozpoznal som: {self._file.name} — môžeš z neho spraviť:"
+            else f"Rozpoznal som: {self._file.name} — vyber, čo z neho spraviť:"
         )
         for label_text, func in actions:
-            card = QWidget()
-            card.setObjectName("card")
-            card_layout = QHBoxLayout(card)
-            card_layout.setContentsMargins(0, 0, 0, 0)
-            button = QPushButton(label_text)
-            button.setObjectName("convButton")
-            button.clicked.connect(
-                lambda _=False, f=func: self._run_file_action(f)
-            )
-            description = QLabel(
-                ACTION_DESCRIPTIONS.get(func, label_text)
-            )
-            description.setWordWrap(True)
-            card_layout.addWidget(button)
-            card_layout.addWidget(description, stretch=1)
-            self._conv_layout.addWidget(card)
-            self._conv_buttons.append(card)
+            radio = QRadioButton(ACTION_DESCRIPTIONS.get(func, label_text))
+            self._conv_layout.addWidget(radio)
+            self._conv_radios.append(radio)
+            self._conv_actions.append(func)
+        if self._conv_radios:
+            self._conv_radios[0].setChecked(True)
+            self._convert_button.setEnabled(True)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -983,37 +1026,26 @@ class MainWindow(QMainWindow):
         return default_text_dir()
 
     def _apply_settings_to_controls(self) -> None:
-        """Push the loaded/saved settings into the Output section.
+        """Push the loaded/saved settings into the app state.
 
-        Does not save again: this is called after loading, and
-        after the Settings dialog is saved (which already wrote
-        the file). The floating widget, if already open, gets the
-        new text folder too, so its paste dialog matches.
+        In v0.6 the Output controls lived on the main tab; in
+        v0.6.1 the main tab only shows one plain line saying where
+        the new file will be saved, and the Output settings
+        themselves live in the Settings dialog (which already
+        wrote the file). The floating widget, if already open,
+        gets the new text folder too, so its paste dialog matches.
         """
         folder_mode = self._settings.get("output_mode") == "folder"
         folder = str(self._settings.get("output_folder") or "")
         self._output_dir = Path(folder) if folder_mode and folder else None
-        self._folder_edit.setText(folder)
-        self._folder_radio.setChecked(folder_mode)
-        self._next_radio.setChecked(not folder_mode)
-        self._ask_checkbox.setChecked(
-            bool(self._settings.get("ask_output_file"))
-        )
-        self._on_output_mode_changed()
+        if folder_mode and folder:
+            self._save_info_label.setText(f"Uloží sa do priečinka: {folder}")
+        else:
+            self._save_info_label.setText(
+                "Nový súbor sa uloží vedľa pôvodného súboru."
+            )
         if self._widget is not None:
             self._widget.set_text_dir(self._text_dir())
-
-    def _save_output_settings(self) -> None:
-        """Save the current Output section back to the settings file."""
-        if not hasattr(self, "_settings"):
-            return
-        self._settings["output_mode"] = (
-            "folder" if self._folder_radio.isChecked()
-            else "next_to_original"
-        )
-        self._settings["output_folder"] = self._folder_edit.text().strip()
-        self._settings["ask_output_file"] = self._ask_checkbox.isChecked()
-        save_settings(self._settings)
 
     def _open_settings(self) -> None:
         """Open the Settings dialog from the gear button."""
@@ -1031,29 +1063,9 @@ class MainWindow(QMainWindow):
             f"{'zapnutý' if self._settings.get('show_widget_on_start') else 'vypnutý'})."
         )
 
-    def _on_output_mode_changed(self) -> None:
-        enabled = self._folder_radio.isChecked()
-        self._folder_edit_ref.setEnabled(enabled)
-        self._folder_button_ref.setEnabled(enabled)
-        # Changing the mode is a settings change too, so it is
-        # remembered — but only once the controls exist.
-        if hasattr(self, "_ask_checkbox"):
-            self._save_output_settings()
-
-    def _pick_output_folder(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(self, "Vybrať priečinok pre výstup")
-        if chosen:
-            self._output_dir = Path(chosen)
-            self._folder_edit.setText(chosen)
-            self._folder_radio.setChecked(True)
-            self._save_output_settings()
-            self.log(f"Výstupný priečinok: {chosen}")
-
     def _output_dir_value(self):
         """Chosen output folder, or None for 'next to original'."""
-        if self._folder_radio.isChecked() and self._output_dir is not None:
-            return self._output_dir
-        return None
+        return self._output_dir
 
     # -- drop window -------------------------------------------------------
     def _open_drop_window(self) -> None:
@@ -1089,48 +1101,117 @@ class MainWindow(QMainWindow):
         output_dir = self._output_dir_value()
         return func(target_file, output_dir=output_dir, **self._action_kwargs(func))
 
+    def _execute_with_output(self, func, target_file) -> Path | None:
+        """Run one action, honouring the 'ask for output file' setting.
+
+        Returns the output path, or None if the user cancelled the
+        Save dialog. Raises on failure — the caller shows a
+        friendly message, the technical detail stays in the log.
+        """
+        if self._settings.get("ask_output_file"):
+            proposed = default_output_for(
+                target_file, func, output_dir=self._output_dir_value()
+            )
+            ext = proposed.suffix.lstrip(".").upper()
+            chosen, _ = QFileDialog.getSaveFileName(
+                self,
+                "Uložiť výstup ako",
+                str(proposed),
+                f"{ext} (*{proposed.suffix});;All files (*.*)",
+            )
+            if not chosen:
+                self.log("Ukladanie výstupu zrušené.")
+                return None
+            return func(
+                target_file, output_path=Path(chosen),
+                **self._action_kwargs(func),
+            )
+        return self._execute_file_action(func, target_file)
+
     def _run_file_action(self, func, file_path=None) -> None:
         """Run a file action, respecting the Output settings.
 
-        ``file_path`` is set by the Drop window; otherwise the picked
-        file is used. When "ask for output file" is on, a Save dialog
-        prefilled with the proposed name is shown first — the user
-        can rename / relocate it, and the never-overwrite rule still
-        applies to the chosen path. Pasted-text saving is untouched
-        by this (it keeps its own save dialog in _paste_text).
+        Used by the Drop window. ``file_path`` is set by the Drop
+        window; otherwise the picked file is used. Failures are
+        explained in plain words; the technical detail stays in
+        the log. Pasted-text saving is untouched by this (it keeps
+        its own save dialog in _paste_text).
         """
         target_file = file_path if file_path is not None else self._file
         if target_file is None:
             self.log("Žiadny súbor vybratý — najprv vyber súbor.")
             QMessageBox.warning(self, "Žiadny súbor", "Najprv vyber súbor.")
             return
-        output_dir = self._output_dir_value()
         try:
-            if self._ask_checkbox.isChecked():
-                proposed = default_output_for(target_file, func, output_dir=output_dir)
-                ext = proposed.suffix.lstrip(".").upper()
-                chosen, _ = QFileDialog.getSaveFileName(
-                    self,
-                    "Uložiť výstup ako",
-                    str(proposed),
-                    f"{ext} (*{proposed.suffix});;All files (*.*)",
-                )
-                if not chosen:
-                    self.log("Ukladanie výstupu zrušené.")
-                    return
-                output = func(
-                    target_file, output_path=Path(chosen),
-                    **self._action_kwargs(func),
-                )
-            else:
-                output = self._execute_file_action(func, target_file)
+            output = self._execute_with_output(func, target_file)
         except Exception as exc:
             self.log(f"ZLYHALO {target_file.name}: {exc}")
-            QMessageBox.warning(self, "Zlyhalo", f"{exc}")
+            QMessageBox.warning(self, "Nepodarilo sa", _friendly_error(exc))
+            return
+        if output is None:
+            return
+        self.log(f"Uložené: {output}")
+        self._record_history(target_file.name, output)
+        QMessageBox.information(
+            self, "Hotovo", f"Nový súbor je uložený:\n{output.name}"
+        )
+
+    def _selected_action(self):
+        """The action chosen by the step-2 radio button, or None."""
+        for radio, func in zip(self._conv_radios, self._conv_actions):
+            if radio.isChecked():
+                return func
+        return None
+
+    def _on_convert_clicked(self) -> None:
+        """Step 3: run the chosen conversion, show the result inline.
+
+        Success and failure both land in the result line under
+        the button — no pop-up the user has to close first.
+        """
+        func = self._selected_action()
+        if self._file is None or func is None:
+            return
+        self._convert_button.setEnabled(False)
+        try:
+            output = self._execute_with_output(func, self._file)
+        except Exception as exc:
+            self.log(f"ZLYHALO {self._file.name}: {exc}")
+            self._show_result(False, _friendly_error(exc))
         else:
-            self.log(f"Uložené: {output}")
-            self._record_history(target_file.name, output)
-            QMessageBox.information(self, "Hotovo", f"Uložené:\n{output.name}")
+            if output is not None:
+                self.log(f"Uložené: {output}")
+                self._record_history(self._file.name, output)
+                self._show_result(True, f"Hotovo! Nový súbor: {output.name}")
+        finally:
+            self._convert_button.setEnabled(True)
+
+    def _show_result(self, ok: bool, text: str) -> None:
+        """Show the inline result line (teal = done, red = failed)."""
+        self._result_label.setText(("✓ " if ok else "✗ ") + text)
+        self._result_label.setStyleSheet(
+            "background-color: #17332f; color: #7fd8cb; "
+            "border: 1px solid #2a5a52; border-radius: 8px; padding: 10px;"
+            if ok
+            else "background-color: #33201f; color: #f0a8a0; "
+            "border: 1px solid #5a2e2a; border-radius: 8px; padding: 10px;"
+        )
+        self._result_label.setVisible(True)
+        self._open_folder_button.setVisible(ok)
+        self._next_file_button.setVisible(True)
+
+    def _hide_result(self) -> None:
+        """Hide the result line and its buttons (new file picked)."""
+        self._result_label.setVisible(False)
+        self._open_folder_button.setVisible(False)
+        self._next_file_button.setVisible(False)
+
+    def _reset_flow(self) -> None:
+        """Start over: clear the picked file and the result line."""
+        self._file = None
+        self._file_info_label.setText("Zatiaľ žiadny súbor.")
+        self._hide_result()
+        self._rebuild_conversions()
 
     def _paste_text(self) -> None:
         dialog = TextDialog(self)
@@ -1163,7 +1244,7 @@ class MainWindow(QMainWindow):
                 output = save_text_to_path(text, chosen, "md")
         except Exception as exc:
             self.log(f"ZLYHALO ukladanie textu: {exc}")
-            QMessageBox.warning(self, "Zlyhalo", f"{exc}")
+            QMessageBox.warning(self, "Nepodarilo sa", _friendly_error(exc))
         else:
             self.log(f"Uložený vložený text: {output}")
 
