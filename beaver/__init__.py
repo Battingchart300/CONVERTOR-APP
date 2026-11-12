@@ -1,1 +1,1 @@
-"""Floating-widget file utility prototype (v0.6)."""
+"""Floating-widget file utility prototype (v0.6.1)."""
