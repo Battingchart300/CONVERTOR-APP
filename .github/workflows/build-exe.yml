@@ -1,0 +1,63 @@
+# CONVERTOR-APP — Windows .exe build (v0.6.1)
+#
+# Builds a single CONVERTOR-APP.exe with PyInstaller on
+# windows-latest. A tagged push (v0.6.1, v0.6.2, ...) creates a
+# GitHub Release with the .exe attached, so an ordinary user
+# just downloads one file and double-clicks it — no Python,
+# no PowerShell, no .zip. Manual runs and pull requests only
+# build and upload the .exe as a workflow artifact (no release).
+name: Build Windows .exe
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .exe (PyInstaller, one file, no console)
+        run: pyinstaller --clean --noconfirm CONVERTOR-APP.spec
+
+      - name: Check the .exe exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/CONVERTOR-APP.exe)) {
+            throw "dist/CONVERTOR-APP.exe was not built"
+          }
+          (Get-Item dist/CONVERTOR-APP.exe).Length
+
+      - name: Upload .exe as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CONVERTOR-APP-windows
+          path: dist/CONVERTOR-APP.exe
+
+      - name: Attach .exe to the GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CONVERTOR-APP.exe
+          generate_release_notes: true
