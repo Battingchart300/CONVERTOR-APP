@@ -83,13 +83,18 @@ class RingMenu(QWidget):
     def _run(self, func) -> None:
         try:
             output = func()
-        except Exception as exc:  # show it, do not crash the widget
-            QMessageBox.warning(self, "Zlyhalo", f"{exc}")
+        except Exception:  # show a plain message, do not crash the widget
+            QMessageBox.warning(
+                self, "Nepodarilo sa",
+                "Súbor sa nepodarilo spracovať. Skús iný súbor.",
+            )
         else:
             if output is None:
                 pass  # user cancelled a save dialog — nothing to report
             elif isinstance(output, Path):
-                QMessageBox.information(self, "Hotovo", f"Uložené:\n{output.name}")
+                QMessageBox.information(
+                    self, "Hotovo", f"Nový súbor je uložený:\n{output.name}"
+                )
             else:
                 QMessageBox.information(self, "Hotovo", str(output))
         self.close()
@@ -142,13 +147,11 @@ class FloatingWidget(QWidget):
             Path(text_dir) if text_dir is not None else default_text_dir()
         )
 
-    def set_text_dir(self, text_dir) -> None:
-        """Update the paste-dialog default folder (Settings change)."""
-        if text_dir is not None:
-            self._text_dir = Path(text_dir)
-
         # Original icon drawn in code: a plain circle with an emoji
         # label. No third-party artwork is embedded anywhere.
+        # (v0.6.1 fix: this used to live in set_text_dir(), so the
+        # widget showed up empty until Settings were saved — and
+        # every save added another icon and button on top.)
         label = QLabel("🦫", self)
         label.setGeometry(0, 0, 72, 72)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -166,6 +169,11 @@ class FloatingWidget(QWidget):
             "QPushButton:hover { background: #3d5a80; }"
         )
         text_button.clicked.connect(self._open_text)
+
+    def set_text_dir(self, text_dir) -> None:
+        """Update the paste-dialog default folder (Settings change)."""
+        if text_dir is not None:
+            self._text_dir = Path(text_dir)
 
     def _open_text(self) -> None:
         dialog = TextDialog(self)
@@ -242,7 +250,9 @@ class FloatingWidget(QWidget):
             return
         file_path = Path(urls[0].toLocalFile())
         if not file_path.is_file():
-            QMessageBox.warning(self, "Zlyhalo", "Pretiahni jeden súbor, nie priečinok.")
+            QMessageBox.warning(
+                self, "Nepodarilo sa", "Pretiahni jeden súbor, nie priečinok."
+            )
             return
         # Route by extension (v0.3 adds .odt/.ods/.odp): .md -> MD
         # ring, .pdf -> PDF ring, .docx -> Word ring, .odt/.ods/.odp
