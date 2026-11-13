@@ -4,6 +4,8 @@ Local desktop file converter for Windows. Pick a file, get only the conversions 
 
 No upload, no account, no keys, no telemetry. Everything runs locally.
 
+![CONVERTOR-APP v0.6.1 — hlavné okno v troch krokoch: vyber súbor, vyber čo z neho spraviť, klikni na Konvertovať](screenshot.png)
+
 ## Stiahnutie (Windows)
 
 Najjednoduchšie: stiahni **CONVERTOR-APP.exe** z [Releases](https://github.com/Battingchart300/CONVERTOR-APP/releases) a dvakrát naň klikni. Nič sa neinštaluje, Python netreba, žiadny .zip.
@@ -64,7 +66,7 @@ beaver/
 - Document → PDF keeps text, headings and simple lists. Images, complex tables and exact layout are **not** preserved — this is a text converter, not a layout clone.
 - Formulas are read as their stored (cached) value, not recalculated. XLSX / ODS → CSV is the first sheet only.
 - Scanned / image-only PDFs have no extractable text, so PDF → Markdown on those yields (nearly) empty output.
-- The Windows GUI run of v0.6.1 has not been tested yet — code compiles and the actions were tested on Linux (31/31 checks in v0.5). The .exe is built by GitHub Actions after the v0.6.1 tag is pushed — it has not been run yet either. See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
+- The Windows GUI v0.6.1 runs (confirmed 13.11. — see the screenshot above); the .exe from Release has not been run yet. The actions were tested on Linux (31/31 checks in v0.5). See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
 
 ## License
 
