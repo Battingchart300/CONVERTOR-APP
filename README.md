@@ -12,6 +12,8 @@ Najjednoduchšie: stiahni **CONVERTOR-APP.exe** z [Releases](https://github.com/
 
 > Pri prvom spustení môže Windows ukázať varovanie SmartScreen, pretože .exe nie je digitálne podpísaný. Klikni na „Ďalšie informácie" → „Spustiť aj tak". Súbor sa stavia automaticky z tohto repozitára cez GitHub Actions, nič iné v ňom nie je.
 
+> Prečo má .exe ~130 MB? Obsahuje v sebe celý Python aj všetky knižnice (PySide6, Pillow, PyMuPDF, python-docx, reportlab, Markdown) — preto netreba nič inštalovať ani mať Python. Samotný kód appky má len ~0,4 MB.
+
 ## What it does
 
 | Input | Output |
