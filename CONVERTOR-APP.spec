@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller build for CONVERTOR-APP (v0.6.1).
+"""PyInstaller build for CONVERTOR-APP (v0.8.0).
 
 One Windows .exe, no console window: double-click and the GUI
 opens. Run locally on Windows with:

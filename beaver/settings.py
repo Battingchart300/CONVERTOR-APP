@@ -55,6 +55,7 @@ def default_settings() -> dict:
         "show_widget_on_start": False,
         "jpg_quality": 92,
         "compress_quality": 70,
+        "theme": "default",
     }
 
 
@@ -97,6 +98,9 @@ def _sanitise(raw: object) -> dict:
             settings[key] = max(10, min(int(value), 100))
         except (TypeError, ValueError):
             pass
+    theme = raw.get("theme")
+    if isinstance(theme, str) and theme in ("default", "blue", "light"):
+        settings["theme"] = theme
     return settings
 
 

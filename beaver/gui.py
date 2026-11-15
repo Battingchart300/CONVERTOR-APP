@@ -1,12 +1,18 @@
-"""Main local GUI window for CONVERTOR-APP (v0.6.1).
+"""Main local GUI window for CONVERTOR-APP (v0.8.0).
 
 One clear flow for ordinary users (v0.6.1): the "Konvertor" tab is
 just three steps — 1. pick a file, 2. pick what to make of it,
 3. one big "Konvertovať" button — plus a plain result line.
 Advanced stuff (text paste, drop window, batch, widget toggle)
-lives on the "Ďalšie" tab; log and history on "Log a história".
+lives on the "Ďalšie" tab. In v0.8 the log and history moved
+out of the main window entirely — they live in Settings
+("Nastavenia → Log a história"), because the first real user
+called them unnecessary on the main screen. The look stays
+the default dark + teal design, but Settings → Vzhľad lets
+the user pick another theme and always offers "Obnoviť
+predvolený vzhľad" to get the default back.
 All GUI strings are Slovak, no jargon; errors are explained in
-plain words. Dark design with one teal accent, as in v0.6.
+plain words.
 
 Layout:
   Header — app name + subtitle "Lokálny konvertor — bez cloudu,
@@ -16,8 +22,8 @@ Layout:
   step 3 (one big Konvertovať button + result line), and one
   line saying where the new file will be saved.
   Tab "Ďalšie": text paste, drop window, batch, widget toggle.
-  Tab "Log a história": timestamped log + session history list
-  + "Otvoriť priečinok".
+  Settings: Output, Text, Widget, Images, Updates, Vzhľad
+  (theme), Log a história (read-only log + session history).
 
 Behaviour is unchanged from v0.6 apart from the layout: smart
 Conversions (only the actions that fit the picked file), Output
@@ -72,6 +78,13 @@ from .actions import (
     text_to_pdf_path,
 )
 from .settings import default_settings, load_settings, save_settings
+from .themes import (
+    DEFAULT_THEME,
+    result_style,
+    stylesheet_for,
+    theme_label,
+    theme_names,
+)
 from .update_check import check_update, local_version, run_update, spawn_restart
 from .widget import FloatingWidget, TextDialog
 
@@ -145,37 +158,11 @@ def _friendly_error(exc: Exception) -> str:
     return "Niečo sa nepodarilo. Skús to znova, alebo vyber iný súbor."
 
 
-ACCENT = "#2AB8A6"
-
-# One restrained dark theme (v0.6): dark background, one teal accent
-# used only for the primary button and the version badge. Cards,
-# chips and the drop zone stay muted grey so the screen stays calm.
-STYLESHEET = """
-QMainWindow, QWidget { background-color: #12161d; color: #e8ecf1; font-size: 13px; }
-QLabel#appTitle { font-size: 20px; font-weight: bold; }
-QLabel#subtitle { color: #9aa7b4; font-size: 12px; }
-QLabel#versionBadge { background-color: #1b2230; color: #2ab8a6; border: 1px solid #2a3342; border-radius: 10px; padding: 2px 8px; font-weight: bold; }
-QLabel#formatChip { background-color: #1b2230; color: #9aa7b4; border: 1px solid #2a3342; border-radius: 8px; padding: 2px 7px; font-size: 11px; }
-QLabel#fileInfo { color: #c7d0db; }
-QFrame#dropZone { border: 2px dashed #3a4a5e; border-radius: 12px; background-color: #161c27; }
-QLabel#dropZoneTitle { font-size: 17px; font-weight: bold; color: #e8ecf1; }
-QLabel#dropZoneSub { color: #9aa7b4; font-size: 12px; }
-QPushButton { background-color: #1e2530; color: #e8ecf1; border: 1px solid #2a3342; border-radius: 8px; padding: 6px 12px; }
-QPushButton:hover { background-color: #273041; }
-QPushButton#primaryButton { background-color: #2ab8a6; color: #0c1216; border: none; font-weight: bold; }
-QPushButton#primaryButton:hover { background-color: #34c9b6; }
-QPushButton#convertButton { background-color: #2ab8a6; color: #0c1216; border: none; font-weight: bold; font-size: 16px; border-radius: 10px; }
-QPushButton#convertButton:hover { background-color: #34c9b6; }
-QPushButton#convertButton:disabled { background-color: #22303a; color: #5f7080; }
-QRadioButton { spacing: 8px; padding: 4px 0; }
-QPushButton#gearButton { background-color: #1b2230; }
-QGroupBox { border: 1px solid #2a3342; border-radius: 10px; margin-top: 10px; padding-top: 10px; font-weight: bold; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-QTabWidget::pane { border: 1px solid #2a3342; border-radius: 8px; }
-QTabBar::tab { background-color: #1b2230; color: #9aa7b4; border: 1px solid #2a3342; border-bottom: none; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 6px 14px; }
-QTabBar::tab:selected { background-color: #232c3d; color: #e8ecf1; }
-QLineEdit, QPlainTextEdit, QListWidget, QComboBox, QSpinBox { background-color: #171d28; color: #e8ecf1; border: 1px solid #2a3342; border-radius: 6px; padding: 4px; }
-"""
+# Default theme stylesheet (v0.8): the v0.6 dark + teal design,
+# built from beaver/themes.py. The app applies the SAVED theme
+# at startup (see main() below); this constant is only the
+# fallback when no settings exist yet.
+STYLESHEET = stylesheet_for(DEFAULT_THEME)
 
 
 class _DropZone(QFrame):
@@ -318,19 +305,28 @@ class SettingsDialog(QDialog):
 
     Sections: Output (mode, folder, ask-for-output-file), Text
     (default folder for pasted-text saves), Widget (show the
-    floating widget at startup), Images (JPG / compress quality)
-    and Aktualizácie (manual update check + update button).
+    floating widget at startup), Images (JPG / compress quality),
+    Vzhľad (theme: default dark + teal, or another one, with
+    "Obnoviť predvolený vzhľad" to get the default back),
+    Log a história (read-only log + session history — moved
+    here from the main window in v0.8) and Aktualizácie
+    (manual update check + update button).
     ``settings`` holds the chosen
     values after Accept; Cancel leaves everything unchanged;
     "Reset to defaults" restores the default values in the
     dialog (they are only saved when Save is clicked).
+    ``log_lines`` / ``history_entries`` are the current log
+    and session history from the main window (shown read-only).
     """
 
-    def __init__(self, parent, settings: dict):
+    def __init__(self, parent, settings: dict,
+                 log_lines=None, history_entries=None):
         super().__init__(parent)
         self.setWindowTitle("Nastavenia")
         self.setMinimumWidth(480)
         self.settings = dict(settings)
+        self._log_lines = list(log_lines or [])
+        self._history_entries = list(history_entries or [])
         layout = QVBoxLayout(self)
 
         # --- Output ------------------------------------------------
@@ -397,6 +393,44 @@ class SettingsDialog(QDialog):
         images_layout.addLayout(comp_row)
         layout.addWidget(images_box)
 
+        # --- Vzhľad (v0.8) ------------------------------------------
+        # Predvolený vzhľad je tmavý + tyrkysový z v0.6; kto chce,
+        # vyberie iný — a tlačidlo ho kedykoľvek vráti na predvolený.
+        looks_box = QGroupBox("Vzhľad")
+        looks_layout = QVBoxLayout(looks_box)
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(QLabel("Téma:"))
+        self._theme_combo = QComboBox()
+        for name in theme_names():
+            self._theme_combo.addItem(theme_label(name), name)
+        theme_row.addWidget(self._theme_combo, stretch=1)
+        theme_reset = QPushButton("Obnoviť predvolený vzhľad")
+        theme_reset.clicked.connect(self._reset_theme)
+        theme_row.addWidget(theme_reset)
+        looks_layout.addLayout(theme_row)
+        layout.addWidget(looks_box)
+
+        # --- Log a história (v0.8) -----------------------------------
+        # V hlavnom okne už nie sú — prvý reálny používateľ ich
+        # označil za zbytočné na hlavnej obrazovke. Kto ich chce,
+        # nájde ich tu, len na čítanie.
+        log_box = QGroupBox("Log a história")
+        log_layout = QVBoxLayout(log_box)
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setPlainText("\n".join(self._log_lines))
+        self._log_view.setMaximumHeight(160)
+        log_layout.addWidget(self._log_view)
+        self._history_view = QListWidget()
+        for entry in self._history_entries:
+            self._history_view.addItem(entry)
+        self._history_view.setMaximumHeight(110)
+        log_layout.addWidget(self._history_view)
+        open_folder = QPushButton("Otvoriť priečinok")
+        open_folder.clicked.connect(self._open_output_folder)
+        log_layout.addWidget(open_folder)
+        layout.addWidget(log_box)
+
         # --- Updates (v0.5) ----------------------------------------
         update_box = QGroupBox("Aktualizácie")
         update_layout = QVBoxLayout(update_box)
@@ -449,7 +483,21 @@ class SettingsDialog(QDialog):
             self._compress_spin.setValue(int(settings.get("compress_quality", 70)))
         except (TypeError, ValueError):
             self._compress_spin.setValue(70)
+        theme = str(settings.get("theme") or DEFAULT_THEME)
+        index = self._theme_combo.findData(theme)
+        self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
         self._on_folder_toggled()
+
+    def _reset_theme(self) -> None:
+        """Back to the default look (v0.8): dark + teal."""
+        index = self._theme_combo.findData(DEFAULT_THEME)
+        self._theme_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _open_output_folder(self) -> None:
+        """Open the folder of the last conversion (via main window)."""
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "_open_output_folder"):
+            parent._open_output_folder()
 
     def _check_updates(self) -> None:
         """Manual update check: status text + enable Update if available.
@@ -543,6 +591,7 @@ class SettingsDialog(QDialog):
             "show_widget_on_start": self._widget_checkbox.isChecked(),
             "jpg_quality": self._jpg_spin.value(),
             "compress_quality": self._compress_spin.value(),
+            "theme": self._theme_combo.currentData() or DEFAULT_THEME,
         }
         super().accept()
 
@@ -650,13 +699,19 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CONVERTOR-APP v0.6.1")
+        self.setWindowTitle("CONVERTOR-APP v0.8.0")
         self.setMinimumSize(720, 700)
         self.setAcceptDrops(True)
         self._file: Path | None = None
         self._widget: FloatingWidget | None = None
         self._drop_window: DropWindow | None = None
         self._output_dir: Path | None = None
+        # Log and history are plain lists now (v0.8): the tab is
+        # gone from the main window, and Settings shows them
+        # read-only from these lists.
+        self._log_lines: list[str] = []
+        self._history_entries: list[str] = []
+        self._last_output: Path | None = None
         # Loaded before any control is built, so the Output section
         # below can be initialised from the saved settings.
         self._settings: dict = load_settings()
@@ -675,7 +730,7 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("subtitle")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
-        version_badge = QLabel("v0.6.1")
+        version_badge = QLabel("v0.8.0")
         version_badge.setObjectName("versionBadge")
         self._update_notice = QPushButton("Aktualizácia k dispozícii")
         self._update_notice.setVisible(False)
@@ -814,31 +869,12 @@ class MainWindow(QMainWindow):
         more_layout.addStretch(1)
         tabs.addTab(more_tab, "Ďalšie")
 
-        # --- Karta 3: Log a história -----------------------------------
-        # Log a história už nezaberajú polovicu hlavnej obrazovky —
-        # sú na druhej karte, kde si ich pozrie ten, kto ich chce.
-        log_tab = QWidget()
-        log_tab_layout = QVBoxLayout(log_tab)
-        log_box = QGroupBox("Log")
-        log_layout = QVBoxLayout(log_box)
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        log_layout.addWidget(self._log)
-        log_tab_layout.addWidget(log_box)
-        history_box = QGroupBox("Posledné konverzie (táto relácia)")
-        history_layout = QVBoxLayout(history_box)
-        self._history_list = QListWidget()
-        history_layout.addWidget(self._history_list)
-        self._last_output: Path | None = None
-        open_folder = QPushButton("Otvoriť priečinok")
-        open_folder.clicked.connect(self._open_output_folder)
-        history_layout.addWidget(open_folder)
-        log_tab_layout.addWidget(history_box)
-        tabs.addTab(log_tab, "Log a história")
+        # (v0.8: karta "Log a história" je preč z hlavného okna —
+        # log a história žijú v Nastaveniach, len na čítanie.)
 
         self.setCentralWidget(root)
         self._apply_settings_to_controls()
-        self.log("CONVERTOR-APP v0.6.1 pripravená. Pretiahni súbor a klikni na Konvertovať.")
+        self.log("CONVERTOR-APP v0.8.0 pripravená. Pretiahni súbor a klikni na Konvertovať.")
         if self._settings.get("show_widget_on_start"):
             self._toggle_widget()
         # Automatic update check (v0.5): after the window shows,
@@ -848,14 +884,22 @@ class MainWindow(QMainWindow):
 
     # -- log ------------------------------------------------------------
     def log(self, message: str) -> None:
-        self._log.appendPlainText(f"[{_stamp()}] {message}")
+        """Append a timestamped line to the in-memory log (v0.8).
+
+        The log is a plain list now — the Settings dialog shows
+        it read-only when opened. Capped so a long session
+        cannot grow it without bound.
+        """
+        self._log_lines.append(f"[{_stamp()}] {message}")
+        while len(self._log_lines) > 500:
+            self._log_lines.pop(0)
 
     def _record_history(self, source_name: str, output: Path) -> None:
         """Add a file → output entry to the session history list."""
         self._last_output = Path(output)
-        self._history_list.addItem(f"{source_name} → {output.name}")
-        while self._history_list.count() > 50:
-            self._history_list.takeItem(0)
+        self._history_entries.append(f"{source_name} → {output.name}")
+        while len(self._history_entries) > 50:
+            self._history_entries.pop(0)
 
     def _open_output_folder(self) -> None:
         """Open the folder of the last successful conversion."""
@@ -1044,12 +1088,28 @@ class MainWindow(QMainWindow):
             self._save_info_label.setText(
                 "Nový súbor sa uloží vedľa pôvodného súboru."
             )
+        self._apply_theme()
         if self._widget is not None:
             self._widget.set_text_dir(self._text_dir())
 
+    def _theme_name(self) -> str:
+        """Saved theme key, default if missing or unknown."""
+        theme = str(self._settings.get("theme") or DEFAULT_THEME)
+        return theme if theme in theme_names() else DEFAULT_THEME
+
+    def _apply_theme(self) -> None:
+        """Apply the saved theme to the whole app (v0.8)."""
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(stylesheet_for(self._theme_name()))
+
     def _open_settings(self) -> None:
         """Open the Settings dialog from the gear button."""
-        dialog = SettingsDialog(self, self._settings)
+        dialog = SettingsDialog(
+            self, self._settings,
+            log_lines=self._log_lines,
+            history_entries=self._history_entries,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._settings = dialog.settings
@@ -1060,7 +1120,8 @@ class MainWindow(QMainWindow):
             f"(výstup: {self._settings['output_mode']}, "
             f"priečinok pre text: {self._text_dir()}, "
             "widget pri spustení: "
-            f"{'zapnutý' if self._settings.get('show_widget_on_start') else 'vypnutý'})."
+            f"{'zapnutý' if self._settings.get('show_widget_on_start') else 'vypnutý'}, "
+            f"téma: {theme_label(self._theme_name())})."
         )
 
     def _output_dir_value(self):
@@ -1187,15 +1248,9 @@ class MainWindow(QMainWindow):
             self._convert_button.setEnabled(True)
 
     def _show_result(self, ok: bool, text: str) -> None:
-        """Show the inline result line (teal = done, red = failed)."""
+        """Show the inline result line (themed ok/fail colors)."""
         self._result_label.setText(("✓ " if ok else "✗ ") + text)
-        self._result_label.setStyleSheet(
-            "background-color: #17332f; color: #7fd8cb; "
-            "border: 1px solid #2a5a52; border-radius: 8px; padding: 10px;"
-            if ok
-            else "background-color: #33201f; color: #f0a8a0; "
-            "border: 1px solid #5a2e2a; border-radius: 8px; padding: 10px;"
-        )
+        self._result_label.setStyleSheet(result_style(ok, self._theme_name()))
         self._result_label.setVisible(True)
         self._open_folder_button.setVisible(ok)
         self._next_file_button.setVisible(True)
@@ -1261,7 +1316,10 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setStyleSheet(STYLESHEET)
+    # Saved theme (v0.8): the default dark + teal when nothing
+    # is saved yet. The main window re-applies it from its own
+    # settings after it loads them.
+    app.setStyleSheet(stylesheet_for(str(load_settings().get("theme") or DEFAULT_THEME)))
     window = MainWindow()
     window.show()
     return app.exec()

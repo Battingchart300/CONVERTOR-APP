@@ -1,4 +1,4 @@
-# CONVERTOR-APP — v0.6.1
+# CONVERTOR-APP — v0.8.0
 
 Local desktop file converter for Windows. Pick a file, get only the conversions that fit it, and save a new file — the original is never overwritten.
 
@@ -68,7 +68,7 @@ beaver/
 - Document → PDF keeps text, headings and simple lists. Images, complex tables and exact layout are **not** preserved — this is a text converter, not a layout clone.
 - Formulas are read as their stored (cached) value, not recalculated. XLSX / ODS → CSV is the first sheet only.
 - Scanned / image-only PDFs have no extractable text, so PDF → Markdown on those yields (nearly) empty output.
-- The Windows GUI v0.6.1 runs (confirmed 13.11. — see the screenshot above); the .exe from Release has not been run yet. The actions were tested on Linux (31/31 checks in v0.5). See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
+- The Windows GUI v0.8.0 has not been run on Windows yet — the code compiles and was smoke-tested headless on Linux (window opens, Settings open, theme switches). The .exe is built by GitHub Actions after the v0.8.0 tag is pushed. The screenshot above is from v0.6.1 (same default look, but it still shows the old "Log a história" tab that v0.8.0 removed). See [CHANGELOG.md](CHANGELOG.md) for the full version history and test notes.
 
 ## License
 

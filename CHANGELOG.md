@@ -2,6 +2,20 @@
 
 Full version history, moved here from README.md on 2026-11-08 so the README stays short and portfolio-ready. Nothing below was rewritten — it is the v0.5.2 README as it stood.
 
+## v0.8.0 — Log preč z hlavnej obrazovky + vlastný vzhľad
+
+Prvý reálny používateľ (kamarát, 4/5) povedal dve veci a obe
+sú v tejto verzii: log/história je preč z hlavného okna —
+žije už len v Nastaveniach ("Log a história", len na
+čítanie), takže hlavná obrazovka má len dve karty
+(Konvertor, Ďalšie). A vzhľad: predvolený ostáva tmavý +
+tyrkysový z v0.6, ale Nastavenia → Vzhľad ponúkajú ďalšie
+témy (Tmavá modrá, Svetlá) a tlačidlo "Obnoviť predvolený
+vzhľad" kedykoľvek vráti predvolenú. Správanie sa nemení:
+konverzie, výstup, okno na pretiahnutie, hromadná konverzia,
+widget, kontrola aktualizácií aj auto-reštart fungujú ako
+vo v0.6.1.
+
 ## v0.6.1 — jednoduchšie GUI pre bežných ľudí + Windows .exe
 
 Hlavná obrazovka je už len jeden jasný postup v troch krokoch:
